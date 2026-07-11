@@ -1,0 +1,22 @@
+ForgeGuard Kokoro Server
+Copyright 2026 ForgeGuard
+
+This product is a modified fork of Kokoro-FastAPI
+(https://github.com/remsky/Kokoro-FastAPI),
+Copyright remsky and the Kokoro-FastAPI contributors,
+licensed under the Apache License, Version 2.0.
+
+Modifications by ForgeGuard include (non-exhaustive): non-blocking startup with
+background model warmup and readiness endpoints, optional bearer-token
+authentication, a React web console, Jetson (arm64/L4T) and CUDA cu128 images,
+a renamed Helm chart, and removal of bare-metal run support in favor of
+container-only distribution. See CHANGELOG.md for details.
+
+This product uses the Kokoro-82M text-to-speech model
+(https://huggingface.co/hexgrad/Kokoro-82M) by hexgrad, licensed under the
+Apache License, Version 2.0, together with the kokoro
+(https://github.com/hexgrad/kokoro) and misaki
+(https://github.com/hexgrad/misaki) libraries.
+
+Portions of the inference code are adapted from StyleTTS2
+(https://github.com/yl4579/StyleTTS2), licensed under the MIT License.

@@ -1,0 +1,136 @@
+[project]
+name = "kokoro-server"
+version = "1.1.0"
+description = "Container-native OpenAI-compatible TTS server built on Kokoro-82M"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # Core dependencies
+    "fastapi==0.139.0",
+    "uvicorn==0.50.0",
+    "click>=8.0.0",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "python-dotenv==1.0.1",
+    "sqlalchemy==2.0.27",
+    # ML/DL Base
+    "numpy>=1.26.0",
+    "scipy==1.14.1",
+    # Audio processing
+    "soundfile==0.13.0",
+    "regex==2024.11.6",
+    # Utilities
+    "aiofiles==23.2.1",
+    "tqdm==4.67.1",
+    "requests==2.32.3",
+    "munch==4.0.0",
+    "tiktoken==0.8.0",
+    "loguru==0.7.3",
+    "openai>=1.59.6",
+    "pydub>=0.25.1",
+    "matplotlib>=3.10.0",
+    "mutagen>=1.47.0",
+    "psutil>=6.1.1",
+    "espeakng-loader==0.2.4",
+    "kokoro==0.9.4",
+    "misaki[en,ja,ko,zh]==0.9.4",
+    "spacy==3.8.5",
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+    "inflect>=7.5.0",
+    "phonemizer-fork>=3.3.2",
+    "av>=14.2.0",
+    "text2num>=2.5.1",
+]
+
+[project.optional-dependencies]
+# Single GPU extra covering both published images:
+#   * x86_64  -> cu128 wheels (sm_86..sm_120), i.e. RTX 3000 (Ampere) through
+#     RTX 5000 (Blackwell) in one image.
+#   * aarch64 -> JetPack-native wheels for the Jetson image, matched to the
+#     L4T R36 / JetPack 6 base image's actual CUDA 12.6 + cuDNN 9.3 stack (see
+#     `cat /etc/nv_tegra_release` and `nvidia-smi` on the host). Two other
+#     combinations were tried and rejected:
+#       - generic pytorch.org cu129 aarch64 wheels only ship kernels for
+#         sm_80/90/100/120 (server-grade Grace/GH200 GPUs), not Orin's sm_87:
+#         "CUDA error: no kernel image is available for execution".
+#       - the jetson-ai-lab jp6/cu129 index builds are for a newer CUDA/cuDNN
+#         generation (cuDNN 9.13) than what's actually installed on this
+#         JetPack 6 image (cuDNN 9.3): "cuDNN version incompatibility".
+#     jp6/cu126 matches this image exactly and needs no extra cuDNN/cuBLAS
+#     pip packages, only cuDSS (see note below).
+gpu = [
+    "torch==2.9.0+cu128 ; platform_machine == 'x86_64'",
+    "torch==2.11.0 ; platform_machine == 'aarch64'",
+    # cuDSS (CUDA direct sparse solver) is a newer CUDA component not bundled
+    # in the l4t-jetpack base image and not installable via its apt repos
+    # (only stock Ubuntu ports repos are configured there). Pull it from
+    # PyPI and add its lib dir to LD_LIBRARY_PATH (see Dockerfile).
+    # NOTE: cuDSS transitively pulls nvidia-cublas-cu12 (a CUDA 12.9 cuBLAS)
+    # which torch preloads over the system cuBLAS 12.6 and crashes with
+    # CUBLAS_STATUS_ALLOC_FAILED; the Dockerfile uninstalls it after sync.
+    "nvidia-cudss-cu12 ; platform_machine == 'aarch64'",
+]
+# CPU wheels — used by CI/tests (`uv run --extra test --extra cpu pytest`).
+cpu = ["torch==2.9.0"]
+test = [
+    "pytest==8.3.5",
+    "pytest-cov==6.0.0",
+    "httpx==0.26.0",
+    "pytest-asyncio==0.25.3",
+    "tomli>=2.0.1",
+    "jinja2>=3.1.6",
+]
+# Integration test deps (faster-whisper, jiwer, soundfile, etc.) intentionally
+# live in the tts-api-test-client image, not here. Run via:
+#   docker compose -f docker/docker-compose.test.yml up --build \
+#       --abort-on-container-exit --exit-code-from test-client
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "gpu" },
+    ],
+]
+override-dependencies = [
+    "triton>=3.5.1 ; platform_machine == 'aarch64'"
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu128", extra = "gpu", marker = "platform_machine == 'x86_64'" },
+    { index = "jetson-jp6-cu126", extra = "gpu", marker = "platform_machine == 'aarch64'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+# JetPack 6 / L4T R36 native wheels (built with Orin/sm_87 kernel support and
+# matched to this base image's CUDA 12.6 / cuDNN 9.3 stack), hosted by the
+# Jetson AI Lab community project. Unlike the pytorch.org cu12x aarch64
+# wheels, these link against the CUDA/cuDNN already present in the
+# l4t-jetpack base image rather than bundling their own nvidia-*-cu12 pip deps.
+[[tool.uv.index]]
+name = "jetson-jp6-cu126"
+url = "https://pypi.jetson-ai-lab.io/jp6/cu126/+simple/"
+explicit = true
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "api/src" }
+packages.find = { where = ["api/src"], namespaces = true }
+
+# Note: pytest configuration lives solely in pytest.ini (which pytest prefers
+# over pyproject.toml when both exist). A previous [tool.pytest.ini_options]
+# block here was dead config and referenced a nonexistent ui/tests path.

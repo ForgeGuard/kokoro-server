@@ -1,0 +1,18 @@
+[run]
+source = 
+    api
+    ui
+omit =
+    Kokoro-82M/*
+    MagicMock/*
+    test_*.py
+    src/builds/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    pass
+    raise ImportError

@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kokoro-server.fullname" . }}-kokoro-tts
+  labels:
+    {{- include "kokoro-server.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.kokoroTTS.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kokoro-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kokoro-server.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.kokoroTTS.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kokoro-server.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers: []
+      containers:
+        - name: kokoro-tts
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.kokoroTTS.repository }}:{{ .Values.kokoroTTS.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.kokoroTTS.pullPolicy }}
+          env:
+            - name: PYTHONPATH
+              value: "/app:/app/api"
+            - name: USE_GPU
+              value: "true"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            {{- if .Values.kokoroTTS.apiKey.enabled }}
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "kokoroTTS.apiKey.existingSecret is required when apiKey.enabled" .Values.kokoroTTS.apiKey.existingSecret }}
+                  key: {{ .Values.kokoroTTS.apiKey.secretKey }}
+            {{- end }}
+            {{- with .Values.kokoroTTS.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: kokoro-tts-http
+              containerPort: {{ .Values.kokoroTTS.port | default 8880 }}
+              protocol: TCP
+          startupProbe:
+            {{- toYaml .Values.kokoroTTS.probes.startup | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.kokoroTTS.probes.liveness | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.kokoroTTS.probes.readiness | nindent 12 }}
+          resources:
+            {{- toYaml .Values.kokoroTTS.resources | nindent 12 }}
+          volumeMounts: []
+      volumes: []
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
