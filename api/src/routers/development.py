@@ -1,42 +1,46 @@
+import asyncio
 import base64
-import json
-import os
-import re
-from pathlib import Path
-from typing import AsyncGenerator, List, Tuple, Union
+from typing import Dict
 
 import numpy as np
-import torch
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from kokoro import KPipeline
 from loguru import logger
 
+from ..core.audio_formats import content_type_for
 from ..core.config import settings
 from ..core.model_status import require_model_ready
 from ..inference.base import AudioChunk
 from ..services.audio import AudioNormalizer, AudioService
 from ..services.streaming_audio_writer import StreamingAudioWriter
 from ..services.temp_manager import TempFileWriter
-from ..services.text_processing import smart_split
 from ..services.tts_service import TTSService
-from ..structures import CaptionedSpeechRequest, CaptionedSpeechResponse, WordTimestamp
+from ..structures import CaptionedSpeechRequest, CaptionedSpeechResponse
 from ..structures.custom_responses import JSONStreamingResponse
 from ..structures.text_schemas import (
     GenerateFromPhonemesRequest,
     PhonemeRequest,
     PhonemeResponse,
 )
-from .openai_compatible import process_and_validate_voices, stream_audio_chunks
+from .common import map_speech_exception
+from .openai_compatible import (
+    get_tts_service,
+    process_and_validate_voices,
+    stream_audio_chunks,
+)
 
 router = APIRouter(tags=["text processing"])
 
+# Quiet (model-less) G2P pipelines are expensive to construct — cache per
+# language instead of rebuilding one on every /dev/phonemize call.
+_phoneme_pipelines: Dict[str, KPipeline] = {}
 
-async def get_tts_service() -> TTSService:
-    """Dependency to get TTSService instance"""
-    return (
-        await TTSService.create()
-    )  # Create service with properly initialized managers
+
+def _get_quiet_pipeline(lang_code: str) -> KPipeline:
+    if lang_code not in _phoneme_pipelines:
+        _phoneme_pipelines[lang_code] = KPipeline(lang_code=lang_code, model=False)
+    return _phoneme_pipelines[lang_code]
 
 
 @router.post("/dev/phonemize", response_model=PhonemeResponse)
@@ -53,27 +57,20 @@ async def phonemize_text(request: PhonemeRequest) -> PhonemeResponse:
         if not request.text:
             raise ValueError("Text cannot be empty")
 
-        # Initialize Kokoro pipeline in quiet mode (no model)
-        pipeline = KPipeline(lang_code=request.language, model=False)
+        def _phonemize():
+            # G2P is blocking (espeak/lexicon work) — keep it off the loop.
+            pipeline = _get_quiet_pipeline(request.language)
+            for result in pipeline(request.text):
+                # result.phonemes = phonemized text
+                return result.phonemes
+            return None
 
-        # Get first result from pipeline (we only need one since we're not chunking)
-        for result in pipeline(request.text):
-            # result.graphemes = original text
-            # result.phonemes = phonemized text
-            # result.tokens = token objects (if available)
-            return PhonemeResponse(phonemes=result.phonemes, tokens=[])
-
-        raise ValueError("Failed to generate phonemes")
-    except ValueError as e:
-        logger.error(f"Error in phoneme generation: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail={"error": "Server error", "message": str(e)}
-        )
+        phonemes = await asyncio.to_thread(_phonemize)
+        if phonemes is None:
+            raise ValueError("Failed to generate phonemes")
+        return PhonemeResponse(phonemes=phonemes, tokens=[])
     except Exception as e:
-        logger.error(f"Error in phoneme generation: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail={"error": "Server error", "message": str(e)}
-        )
+        raise map_speech_exception(e)
 
 
 @router.post("/dev/generate_from_phonemes", dependencies=[Depends(require_model_ready)])
@@ -83,6 +80,7 @@ async def generate_from_phonemes(
     tts_service: TTSService = Depends(get_tts_service),
 ) -> StreamingResponse:
     """Generate audio directly from phonemes using Kokoro's phoneme format"""
+    writer = None
     try:
         # Basic validation
         if not isinstance(request.phonemes, str):
@@ -91,7 +89,9 @@ async def generate_from_phonemes(
             raise ValueError("Phonemes cannot be empty")
 
         # Create streaming audio writer and normalizer
-        writer = StreamingAudioWriter(format="wav", sample_rate=24000, channels=1)
+        writer = StreamingAudioWriter(
+            format="wav", sample_rate=settings.sample_rate, channels=1
+        )
         normalizer = AudioNormalizer()
 
         async def generate_chunks():
@@ -115,16 +115,16 @@ async def generate_from_phonemes(
                     final_bytes = writer.write_chunk(finalize=True)
                     if final_bytes:
                         yield final_bytes
-                        writer.close()
                 else:
                     raise ValueError("Failed to generate audio data")
 
             except Exception as e:
                 logger.error(f"Error in audio generation: {str(e)}")
-                # Clean up writer on error
-                writer.close()
-                # Re-raise the original exception
                 raise
+            finally:
+                # Runs on completion, error, AND client disconnect — an
+                # except-only close leaked the PyAV encoder on aborts.
+                writer.close()
 
         return StreamingResponse(
             generate_chunks(),
@@ -137,26 +137,8 @@ async def generate_from_phonemes(
             },
         )
 
-    except ValueError as e:
-        logger.error(f"Error generating audio: {str(e)}")
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": "validation_error",
-                "message": str(e),
-                "type": "invalid_request_error",
-            },
-        )
     except Exception as e:
-        logger.error(f"Error generating audio: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "processing_error",
-                "message": str(e),
-                "type": "server_error",
-            },
-        )
+        raise map_speech_exception(e, writer)
 
 
 @router.post("/dev/captioned_speech", dependencies=[Depends(require_model_ready)])
@@ -168,27 +150,21 @@ async def create_captioned_speech(
 ):
     """Generate audio with word-level timestamps using streaming approach"""
 
+    writer = None
     try:
-        # model_name = get_model_name(request.model)
-        tts_service = await get_tts_service()
         voice_name = await process_and_validate_voices(request.voice, tts_service)
 
         # Set content type based on format
-        content_type = {
-            "mp3": "audio/mpeg",
-            "opus": "audio/opus",
-            "m4a": "audio/mp4",
-            "flac": "audio/flac",
-            "wav": "audio/wav",
-            "pcm": "audio/pcm",
-        }.get(request.response_format, f"audio/{request.response_format}")
+        content_type = content_type_for(request.response_format)
 
-        writer = StreamingAudioWriter(request.response_format, sample_rate=24000)
+        writer = StreamingAudioWriter(
+            request.response_format, sample_rate=settings.sample_rate
+        )
         # Check if streaming is requested (default for OpenAI client)
         if request.stream:
             # Create generator but don't start it yet
             generator = stream_audio_chunks(
-                tts_service, request, client_request, writer
+                tts_service, request, client_request, writer, voice_name
             )
 
             # If download link requested, wrap generator with temp file writer
@@ -213,11 +189,15 @@ async def create_captioned_speech(
                 # Create async generator for streaming
                 async def dual_output():
                     try:
+                        # The timestamp acumulator is only used when word level
+                        # time stamps are generated but no audio is returned.
+                        # It must live OUTSIDE the loop: resetting it per
+                        # iteration silently dropped the timestamps carried by
+                        # chunks whose encoder output was empty.
+                        timestamp_acumulator = []
+
                         # Write chunks to temp file and stream
                         async for chunk_data in generator:
-                            # The timestamp acumulator is only used when word level time stamps are generated but no audio is returned.
-                            timestamp_acumulator = []
-
                             if chunk_data.output:  # Skip empty chunks
                                 await temp_writer.write(chunk_data.output)
                                 base64_chunk = base64.b64encode(
@@ -299,8 +279,13 @@ async def create_captioned_speech(
 
                 except Exception as e:
                     logger.error(f"Error in single output streaming: {e}")
-                    writer.close()
                     raise
+                finally:
+                    # Runs on normal completion, client disconnect (the
+                    # generator is closed without an exception), and errors —
+                    # an except-only close leaked the PyAV encoder on every
+                    # aborted stream.
+                    writer.close()
 
             # Standard streaming without download link
             return JSONStreamingResponse(
@@ -362,57 +347,8 @@ async def create_captioned_speech(
                 },
             )
 
-    except ValueError as e:
-        # Handle validation errors
-        logger.warning(f"Invalid request: {str(e)}")
-
-        try:
-            writer.close()
-        except:
-            pass
-
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": "validation_error",
-                "message": str(e),
-                "type": "invalid_request_error",
-            },
-        )
-    except RuntimeError as e:
-        # Handle runtime/processing errors
-        logger.error(f"Processing error: {str(e)}")
-
-        try:
-            writer.close()
-        except:
-            pass
-
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "processing_error",
-                "message": str(e),
-                "type": "server_error",
-            },
-        )
     except Exception as e:
-        # Handle unexpected errors
-        logger.error(f"Unexpected error in captioned speech generation: {str(e)}")
-
-        try:
-            writer.close()
-        except:
-            pass
-
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "processing_error",
-                "message": str(e),
-                "type": "server_error",
-            },
-        )
+        raise map_speech_exception(e, writer)
 
 
 @router.post("/dev/unload")
@@ -429,8 +365,6 @@ async def unload_model(
             raise HTTPException(status_code=503, detail={"error": "Model manager not initialized"})
         await tts_service.model_manager.unload()
         return JSONResponse({"status": "unloaded"})
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error unloading model: {e}")
-        raise HTTPException(status_code=500, detail={"error": str(e)})
+        raise map_speech_exception(e)

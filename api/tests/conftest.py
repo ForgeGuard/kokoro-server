@@ -17,7 +17,7 @@ from api.src.structures.model_schemas import VoiceConfig
 def mock_voice_tensor():
     """Load a real voice tensor for testing."""
     voice_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "src/voices/af_bella.pt"
+        os.path.dirname(os.path.dirname(__file__)), "src/voices/v1_0/af_bella.pt"
     )
     return torch.load(voice_path, map_location="cpu", weights_only=False)
 

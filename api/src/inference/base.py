@@ -7,21 +7,30 @@ import numpy as np
 import torch
 
 
+_TIMESTAMPS_UNSET = object()
+
+
 class AudioChunk:
     """Class for audio chunks returned by model backends"""
 
     def __init__(
         self,
         audio: np.ndarray,
-        word_timestamps: Optional[List] = [],
+        word_timestamps: Optional[List] = _TIMESTAMPS_UNSET,
         output: Optional[Union[bytes, np.ndarray]] = b"",
     ):
         self.audio = audio
-        self.word_timestamps = word_timestamps
+        # A fresh list per instance: a shared default list would be mutated
+        # by combine()'s `+=`. Explicit None (timestamps disabled) is kept.
+        self.word_timestamps = [] if word_timestamps is _TIMESTAMPS_UNSET else word_timestamps
         self.output = output
 
     @staticmethod
     def combine(audio_chunk_list: List):
+        if not audio_chunk_list:
+            raise ValueError(
+                "No audio was generated: the input text produced no speakable chunks"
+            )
         output = AudioChunk(
             audio_chunk_list[0].audio, audio_chunk_list[0].word_timestamps
         )

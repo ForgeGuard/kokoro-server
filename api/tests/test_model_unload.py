@@ -238,4 +238,4 @@ def test_unload_endpoint_500_on_exception():
         response = client.post("/dev/unload")
 
     assert response.status_code == 500
-    assert "GPU exploded" in response.json()["detail"]["error"]
+    assert "GPU exploded" in response.json()["detail"]["message"]

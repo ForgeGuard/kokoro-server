@@ -334,3 +334,66 @@ def test_remaining_symbol():
         )
         == "I love buying products at good store here and at other store"
     )
+
+
+def test_unit_bare_f_is_fahrenheit():
+    """Bare 'F' after a number must read as fahrenheit, not farad (K16).
+
+    VALID_UNITS used to define "f" twice ('degree fahrenheit' then 'farad');
+    the later entry won, so '100 F' was spoken as farads. Fahrenheit is by far
+    the more common intent for a bare F, so it wins; farad is not reachable
+    via bare 'f' anymore (unambiguous forms like µF/nF/pF remain).
+    """
+    result = normalize_text(
+        "It is 100 F outside.",
+        normalization_options=NormalizationOptions(unit_normalization=True),
+    )
+    assert "fahrenheit" in result
+    assert "farad" not in result
+
+
+def test_valid_units_has_no_duplicate_keys():
+    """The VALID_UNITS dict literal must not contain duplicate keys (K16).
+
+    Duplicate keys in a dict literal silently drop the earlier entry, so this
+    guards against reintroducing shadowed units.
+    """
+    import ast
+    from collections import Counter
+
+    import api.src.services.text_processing.normalizer as normalizer_module
+
+    with open(normalizer_module.__file__, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+
+    valid_units_keys = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            getattr(target, "id", None) == "VALID_UNITS" for target in node.targets
+        ):
+            valid_units_keys = [ast.literal_eval(key) for key in node.value.keys]
+            break
+
+    assert valid_units_keys is not None, "VALID_UNITS literal not found"
+    duplicates = [key for key, count in Counter(valid_units_keys).items() if count > 1]
+    assert duplicates == [], f"Duplicate VALID_UNITS keys: {duplicates}"
+
+
+def test_huge_number_run_does_not_crash():
+    """A digit run too long for float (inf) must not raise (K27)."""
+    digits = "9" * 310
+    result = normalize_text(digits, normalization_options=NormalizationOptions())
+    # Graceful no-op: the digits pass through unchanged
+    assert digits in result
+
+
+def test_huge_money_amount_does_not_crash():
+    """A money amount overflowing float must not raise (K27)."""
+    digits = "9" * 310
+    result = normalize_text(
+        f"He owes ${digits} dollars.",
+        normalization_options=NormalizationOptions(),
+    )
+    # Graceful no-op on the number itself (the '$' symbol may still be
+    # replaced by symbol normalization)
+    assert digits in result

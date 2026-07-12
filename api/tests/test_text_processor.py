@@ -75,7 +75,9 @@ async def test_smart_custom_phenomes():
         "This is a short test sentence. [Kokoro](/kˈOkəɹO/) has a feature called custom phenomes. This is made possible by [Misaki](/misˈɑki/), the custom phenomizer that [Kokoro](/kˈOkəɹO/) version one uses"
         in chunks[0][0]
     )
-    assert len(chunks[0][1]) > 0
+    # smart_split no longer yields token lists (only KokoroV1 backend remains,
+    # which re-phonemizes chunk text itself)
+    assert chunks[0][1] == []
 
 
 @pytest.mark.asyncio
@@ -106,7 +108,6 @@ async def test_smart_split_long_text():
     for chunk_text, chunk_tokens in chunks:
         assert isinstance(chunk_text, str)
         assert isinstance(chunk_tokens, list)
-        assert len(chunk_tokens) > 0
 
 
 @pytest.mark.asyncio
@@ -170,7 +171,6 @@ async def test_smart_split_chinese_long():
     for chunk_text, chunk_tokens in chunks:
         assert isinstance(chunk_text, str)
         assert isinstance(chunk_tokens, list)
-        assert len(chunk_tokens) > 0
 
 
 @pytest.mark.asyncio
@@ -201,7 +201,7 @@ async def test_smart_split_with_pause():
     # First chunk: text
     assert chunks[0][2] is None  # No pause
     assert "Hello world" in chunks[0][0]
-    assert len(chunks[0][1]) > 0
+    assert isinstance(chunks[0][1], list)
 
     # Second chunk: pause
     assert chunks[1][2] == 2.5  # 2.5 second pause
@@ -211,7 +211,7 @@ async def test_smart_split_with_pause():
     # Third chunk: text
     assert chunks[2][2] is None  # No pause
     assert "How are you?" in chunks[2][0]
-    assert len(chunks[2][1]) > 0
+    assert isinstance(chunks[2][1], list)
 
 
 @pytest.mark.asyncio
@@ -239,4 +239,68 @@ async def test_smart_split_with_two_pause():
     # Third chunk: text
     assert chunks[2][2] is None  # No pause
     assert "zero point five" in chunks[2][0]
-    assert len(chunks[2][1]) > 0
+    assert isinstance(chunks[2][1], list)
+
+
+def test_get_sentence_info_passes_language_to_token_counter(monkeypatch):
+    """get_sentence_info must count tokens with the requested language (K13).
+
+    Without passing the language through, Chinese text is phonemized with the
+    default US English backend, producing bogus token counts for chunking.
+    """
+    import api.src.services.text_processing.text_processor as tp
+
+    captured_languages = []
+
+    def fake_process_text_chunk(text, language="a", skip_phonemize=False):
+        captured_languages.append(language)
+        return [1] * len(text)
+
+    monkeypatch.setattr(tp, "process_text_chunk", fake_process_text_chunk)
+
+    results = tp.get_sentence_info("这是一个句子。这是第二个句子！", lang_code="z")
+
+    assert len(results) == 2
+    assert captured_languages  # token counting happened
+    assert all(language == "z" for language in captured_languages)
+
+
+def test_get_phonemizer_language_mapping():
+    """Pipeline lang codes map onto phonemizer-supported codes."""
+    from api.src.services.text_processing.text_processor import (
+        get_phonemizer_language,
+    )
+
+    assert get_phonemizer_language("a") == "a"
+    assert get_phonemizer_language("en-us") == "a"
+    assert get_phonemizer_language("b") == "b"
+    assert get_phonemizer_language("en-gb") == "b"
+    assert get_phonemizer_language("z") == "z"
+    # Unsupported languages fall back to US English (previous behavior)
+    assert get_phonemizer_language("j") == "a"
+
+
+@pytest.mark.asyncio
+async def test_smart_split_clause_path_passes_language(monkeypatch):
+    """The over-max-tokens clause splitting path must also count tokens with
+    the requested language (K13)."""
+    import api.src.services.text_processing.text_processor as tp
+
+    captured_languages = []
+
+    def fake_process_text_chunk(text, language="a", skip_phonemize=False):
+        captured_languages.append(language)
+        return [1] * len(text)
+
+    monkeypatch.setattr(tp, "process_text_chunk", fake_process_text_chunk)
+
+    # Single long sentence (> max_tokens with the fake counter) forces the
+    # clause splitting branch inside smart_split.
+    text = "这是第一部分这是第二部分这是第三部分。"
+    chunks = []
+    async for chunk_text, _, _ in tp.smart_split(text, max_tokens=10, lang_code="z"):
+        chunks.append(chunk_text)
+
+    assert chunks
+    assert captured_languages
+    assert all(language == "z" for language in captured_languages)

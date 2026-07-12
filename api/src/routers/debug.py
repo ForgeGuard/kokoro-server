@@ -1,5 +1,4 @@
 import threading
-import time
 from datetime import datetime
 
 import psutil
@@ -71,11 +70,13 @@ async def get_storage_info():
 async def get_system_info():
     process = psutil.Process()
 
-    # CPU Info
+    # CPU Info. interval=None reports usage since the last call instead of
+    # blocking the event loop for a full second per sample (this handler used
+    # two such calls, freezing the whole server ~2s per hit).
     cpu_info = {
         "cpu_count": psutil.cpu_count(),
-        "cpu_percent": psutil.cpu_percent(interval=1),
-        "per_cpu_percent": psutil.cpu_percent(interval=1, percpu=True),
+        "cpu_percent": psutil.cpu_percent(interval=None),
+        "per_cpu_percent": psutil.cpu_percent(interval=None, percpu=True),
         "load_avg": psutil.getloadavg(),
     }
 
@@ -149,63 +150,3 @@ async def get_system_info():
         "network": network_info,
         "gpu": gpu_info,
     }
-
-
-@router.get("/debug/session_pools")
-async def get_session_pool_info():
-    """Get information about ONNX session pools."""
-    from ..inference.model_manager import get_manager
-
-    manager = await get_manager()
-    # The Kokoro V1 backend has no ONNX session pools; older ONNX backends did.
-    # Default to empty so this informational endpoint returns {} rather than 500.
-    pools = getattr(manager, "_session_pools", {})
-    current_time = time.time()
-
-    pool_info = {}
-
-    # Get CPU pool info
-    if "onnx_cpu" in pools:
-        cpu_pool = pools["onnx_cpu"]
-        pool_info["cpu"] = {
-            "active_sessions": len(cpu_pool._sessions),
-            "max_sessions": cpu_pool._max_size,
-            "sessions": [
-                {"model": path, "age_seconds": current_time - info.last_used}
-                for path, info in cpu_pool._sessions.items()
-            ],
-        }
-
-    # Get GPU pool info
-    if "onnx_gpu" in pools:
-        gpu_pool = pools["onnx_gpu"]
-        pool_info["gpu"] = {
-            "active_sessions": len(gpu_pool._sessions),
-            "max_streams": gpu_pool._max_size,
-            "available_streams": len(gpu_pool._available_streams),
-            "sessions": [
-                {
-                    "model": path,
-                    "age_seconds": current_time - info.last_used,
-                    "stream_id": info.stream_id,
-                }
-                for path, info in gpu_pool._sessions.items()
-            ],
-        }
-
-        # Add GPU memory info if available
-        if GPU_AVAILABLE:
-            try:
-                gpus = GPUtil.getGPUs()
-                if gpus:
-                    gpu = gpus[0]  # Assume first GPU
-                    pool_info["gpu"]["memory"] = {
-                        "total_mb": gpu.memoryTotal,
-                        "used_mb": gpu.memoryUsed,
-                        "free_mb": gpu.memoryFree,
-                        "percent_used": (gpu.memoryUsed / gpu.memoryTotal) * 100,
-                    }
-            except Exception:
-                pass
-
-    return pool_info

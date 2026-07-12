@@ -153,8 +153,9 @@ async def test_generate_uses_correct_pipeline(kokoro_backend):
                 speed=1.0,
                 model=kokoro_backend._model,
             )
-            # Voice was staged to a temp file with the expected basename in
-            # the OS temp dir (cross-platform: don't string-match separators).
-            voice_arg = Path(mock_pipeline.call_args[1]["voice"])
-            assert voice_arg.name == "temp_voice_ef_voice"
-            assert voice_arg.parent == Path(tempfile.gettempdir())
+            # The voice tensor is passed to the pipeline directly (KPipeline
+            # accepts CPU float tensors) instead of being staged to a temp
+            # file, which used to shadow updated voice packs across runs.
+            voice_arg = mock_pipeline.call_args[1]["voice"]
+            assert isinstance(voice_arg, torch.Tensor)
+            assert torch.equal(voice_arg, mock_load_voice.return_value)

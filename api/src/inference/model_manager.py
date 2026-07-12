@@ -1,6 +1,7 @@
 """Kokoro V1 model management."""
 
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Optional
 
 import torch
@@ -108,12 +109,22 @@ Model files not found! You need to download the Kokoro V1 model:
 
     async def ensure_backend(self) -> None:
         """Reload the backend if it was unloaded via /dev/unload."""
-        if self._backend:
+        # A backend that exists but is not loaded is a half-initialized
+        # leftover from a failed load — fall through to the locked path so
+        # the load is retried rather than short-circuited.
+        if self._backend is not None and self._backend.is_loaded:
             return
         async with self._lock:
-            if not self._backend:
+            if self._backend is not None and self._backend.is_loaded:
+                return
+            try:
                 await self.initialize()
                 await self.load_model(self._config.pytorch_kokoro_v1_file)
+            except BaseException:
+                # Roll back so the next request retries instead of every
+                # request failing "Model not loaded" until a restart.
+                self._backend = None
+                raise
 
     def get_backend(self) -> BaseModelBackend:
         """Get initialized backend.
@@ -165,12 +176,29 @@ Model files not found! You need to download the Kokoro V1 model:
             self._inflight += 1
 
         try:
+            # Volume is applied once, in TTSService._process_chunk, where the
+            # per-request multiplier falls back to the configured default —
+            # applying the default here as well would stack the two.
             async for chunk in backend.generate(*args, **kwargs):
-                if settings.default_volume_multiplier != 1.0:
-                    chunk.audio *= settings.default_volume_multiplier
                 yield chunk
         except Exception as e:
             raise RuntimeError(f"Generation failed: {e}")
+        finally:
+            async with self._cond:
+                self._inflight -= 1
+                if self._inflight == 0:
+                    self._cond.notify_all()
+
+    @asynccontextmanager
+    async def track_inflight(self):
+        """Register work that uses the backend outside generate() (e.g. direct
+        pipeline calls) so unload() waits for it before freeing the model."""
+        async with self._cond:
+            if self._backend is None:
+                raise RuntimeError("Backend not initialized")
+            self._inflight += 1
+        try:
+            yield
         finally:
             async with self._cond:
                 self._inflight -= 1

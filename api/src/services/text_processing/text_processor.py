@@ -99,6 +99,23 @@ def process_text(text: str, language: str = "a") -> List[int]:
     return process_text_chunk(text, language)
 
 
+def get_phonemizer_language(lang_code: str) -> str:
+    """Map a pipeline lang_code to a language code supported by the phonemizer.
+
+    The phonemizer backend understands 'a' (US English), 'b' (British English)
+    and 'z' (Mandarin Chinese). Any other language falls back to 'a' so token
+    counting still works (previous behavior for unsupported languages).
+    """
+    normalized = (lang_code or "a").lower()
+    if normalized in ("a", "en-us"):
+        return "a"
+    if normalized in ("b", "en-gb"):
+        return "b"
+    if normalized.startswith("z"):
+        return "z"
+    return "a"
+
+
 def get_sentence_info(
     text: str, lang_code: str = "a"
 ) -> List[Tuple[str, List[int], int]]:
@@ -111,6 +128,11 @@ def get_sentence_info(
     else:
         sentences = re.split(r"([.!?;:])(?=\s|$)", text)
 
+    # Use the requested language for token counting so non-English text is not
+    # phonemized with the default US English backend (which under-counts and
+    # breaks chunking for e.g. Chinese).
+    phonemizer_language = get_phonemizer_language(lang_code)
+
     results = []
     for i in range(0, len(sentences), 2):
         sentence = sentences[i].strip()
@@ -122,7 +144,7 @@ def get_sentence_info(
         full = full.strip()
         if not full:  # Skip if empty after stripping
             continue
-        tokens = process_text_chunk(full)
+        tokens = process_text_chunk(full, language=phonemizer_language)
         results.append((full, tokens, len(tokens)))
     return results
 
@@ -145,10 +167,20 @@ async def smart_split(
         Tuple of (text_chunk, tokens, pause_duration_s).
         If pause_duration_s is not None, it's a pause chunk with empty text/tokens.
         Otherwise, it's a text chunk containing the original text.
+
+    Note:
+        Token counts are still computed per sentence to drive chunk packing,
+        but the token lists themselves are no longer yielded (always []). The
+        only consumer of the yielded tokens was the legacy non-KokoroV1 model
+        path, which is no longer reachable; KokoroV1 re-phonemizes the chunk
+        text internally.
     """
     start_time = time.time()
     chunk_count = 0
     logger.info(f"Starting smart split for {len(text)} chars")
+
+    # Language to use when counting tokens for chunk packing
+    phonemizer_language = get_phonemizer_language(lang_code)
 
     # --- Step 1: Split by Pause Tags FIRST ---
     # This operates on the raw input text
@@ -187,10 +219,9 @@ async def smart_split(
             sentences = get_sentence_info(processed_text, lang_code=lang_code)
 
             current_chunk = []
-            current_tokens = []
             current_count = 0
 
-            for sentence, tokens, count in sentences:
+            for sentence, _tokens, count in sentences:
                 # Handle sentences that exceed max tokens (original logic)
                 if count > max_tokens:
                     # Yield current chunk if any
@@ -200,15 +231,13 @@ async def smart_split(
                         logger.debug(
                             f"Yielding chunk {chunk_count}: '{chunk_text[:50]}{'...' if len(processed_text) > 50 else ''}' ({current_count} tokens)"
                         )
-                        yield chunk_text, current_tokens, None
+                        yield chunk_text, [], None
                         current_chunk = []
-                        current_tokens = []
                         current_count = 0
 
                     # Split long sentence on commas (original logic)
                     clauses = re.split(r"([,])", sentence)
                     clause_chunk = []
-                    clause_tokens = []
                     clause_count = 0
 
                     for j in range(0, len(clauses), 2):
@@ -220,8 +249,11 @@ async def smart_split(
 
                         full_clause = clause + comma
 
-                        tokens = process_text_chunk(full_clause)
-                        count = len(tokens)
+                        count = len(
+                            process_text_chunk(
+                                full_clause, language=phonemizer_language
+                            )
+                        )
 
                         # If adding clause keeps us under max and not optimal yet
                         if (
@@ -229,7 +261,6 @@ async def smart_split(
                             and clause_count + count <= settings.target_max_tokens
                         ):
                             clause_chunk.append(full_clause)
-                            clause_tokens.extend(tokens)
                             clause_count += count
                         else:
                             # Yield clause chunk if we have one
@@ -239,9 +270,8 @@ async def smart_split(
                                 logger.debug(
                                     f"Yielding clause chunk {chunk_count}: '{chunk_text[:50]}{'...' if len(processed_text) > 50 else ''}' ({clause_count} tokens)"
                                 )
-                                yield chunk_text, clause_tokens, None
+                                yield chunk_text, [], None
                             clause_chunk = [full_clause]
-                            clause_tokens = tokens
                             clause_count = count
 
                     # Don't forget last clause chunk
@@ -251,7 +281,7 @@ async def smart_split(
                         logger.debug(
                             f"Yielding final clause chunk {chunk_count}: '{chunk_text[:50]}{'...' if len(processed_text) > 50 else ''}' ({clause_count} tokens)"
                         )
-                        yield chunk_text, clause_tokens, None
+                        yield chunk_text, [], None
 
                 # Regular sentence handling (original logic)
                 elif (
@@ -265,14 +295,12 @@ async def smart_split(
                     logger.info(
                         f"Yielding chunk {chunk_count}: '{chunk_text[:50]}{'...' if len(processed_text) > 50 else ''}' ({current_count} tokens)"
                     )
-                    yield chunk_text, current_tokens, None
+                    yield chunk_text, [], None
                     current_chunk = [sentence]
-                    current_tokens = tokens
                     current_count = count
                 elif current_count + count <= settings.target_max_tokens:
                     # Keep building chunk while under target max
                     current_chunk.append(sentence)
-                    current_tokens.extend(tokens)
                     current_count += count
                 elif (
                     current_count + count <= max_tokens
@@ -280,7 +308,6 @@ async def smart_split(
                 ):
                     # Only exceed target max if we haven't reached minimum size yet
                     current_chunk.append(sentence)
-                    current_tokens.extend(tokens)
                     current_count += count
                 else:
                     # Yield current chunk and start new one
@@ -290,9 +317,8 @@ async def smart_split(
                         logger.info(
                             f"Yielding chunk {chunk_count}: '{chunk_text[:50]}{'...' if len(processed_text) > 50 else ''}' ({current_count} tokens)"
                         )
-                        yield chunk_text, current_tokens, None
+                        yield chunk_text, [], None
                     current_chunk = [sentence]
-                    current_tokens = tokens
                     current_count = count
 
             # Don't forget the last chunk for this text part
@@ -302,7 +328,7 @@ async def smart_split(
                 logger.info(
                     f"Yielding final chunk {chunk_count} for part: '{chunk_text[:50]}{'...' if len(processed_text) > 50 else ''}' ({current_count} tokens)"
                 )
-                yield chunk_text, current_tokens, None
+                yield chunk_text, [], None
 
         # --- Handle Pause Part ---
         # Check if the next part is a pause duration string

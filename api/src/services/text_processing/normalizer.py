@@ -118,7 +118,8 @@ VALID_UNITS = {
     "Ω": "ohm",
     "kΩ": "kiloohm",
     "mΩ": "megaohm",  # Resistance (Ohm)
-    "f": "farad",
+    # Note: bare "f" means "degree fahrenheit" (defined under Temperature above);
+    # farad is intentionally not mapped from bare "f" to avoid a duplicate key.
     "µf": "microfarad",
     "nf": "nanofarad",
     "pf": "picofarad",  # Capacitance
@@ -247,6 +248,11 @@ def handle_numbers(n: re.Match[str]) -> str:
     if n.group(1) == "-":
         number *= -1
 
+    if not math.isfinite(number):
+        # Digit runs too long for float (e.g. 300+ digits) overflow to inf;
+        # leave the matched text unchanged instead of crashing downstream.
+        return n.group()
+
     multiplier = translate_multiplier(n.group(3))
 
     number = conditional_int(number)
@@ -278,6 +284,11 @@ def handle_money(m: re.Match[str]) -> str:
 
     if m.group(1) == "-":
         number *= -1
+
+    if not math.isfinite(number):
+        # Digit runs too long for float (e.g. 300+ digits) overflow to inf;
+        # leave the matched text unchanged instead of crashing downstream.
+        return m.group()
 
     multiplier = translate_multiplier(m.group(4))
 

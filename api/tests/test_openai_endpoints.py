@@ -35,7 +35,12 @@ def mock_openai_mappings():
     with patch(
         "api.src.routers.openai_compatible._openai_mappings",
         {
-            "models": {"tts-1": "kokoro-v1_0", "tts-1-hd": "kokoro-v1_0"},
+            "models": {
+                "tts-1": "kokoro-v1_0",
+                "tts-1-hd": "kokoro-v1_0",
+                "kokoro": "kokoro-v1_0",
+                "gpt-4o-mini-tts": "kokoro-v1_0",
+            },
             "voices": {"alloy": "am_adam", "nova": "bf_isabella"},
         },
     ):
@@ -161,7 +166,9 @@ async def test_stream_audio_chunks_client_disconnect():
     writer = StreamingAudioWriter("mp3", 24000)
 
     chunks = []
-    async for chunk in stream_audio_chunks(mock_service, request, mock_request, writer):
+    async for chunk in stream_audio_chunks(
+        mock_service, request, mock_request, writer, "test_voice"
+    ):
         chunks.append(chunk)
 
     writer.close()
@@ -411,10 +418,18 @@ def test_list_voices(mock_tts_service):
 
 
 @patch("api.src.routers.openai_compatible.settings")
-def test_combine_voices(mock_settings, mock_tts_service):
+def test_combine_voices(mock_settings, mock_tts_service, tmp_path):
     """Test combining voices endpoint"""
     # Enable local voice saving for this test
     mock_settings.allow_local_voice_saving = True
+    mock_settings.temp_file_dir = str(tmp_path)
+
+    # The endpoint resolves the (weighted) combination to a .pt via the service
+    # and serves a copy from the managed temp dir.
+    source = tmp_path / "combined-source.pt"
+    source.write_bytes(b"fake-combined-voice-tensor")
+    mock_tts_service.list_voices.return_value = ["voice1", "voice2"]
+    mock_tts_service.resolve_voice_path.return_value = ("voice1+voice2", str(source))
 
     response = client.post("/v1/audio/voices/combine", json="voice1+voice2")
     assert response.status_code == 200
@@ -495,7 +510,9 @@ async def test_streaming_initialization_error():
     writer = StreamingAudioWriter("mp3", 24000)
 
     with pytest.raises(RuntimeError) as exc:
-        async for _ in stream_audio_chunks(mock_service, request, MagicMock(), writer):
+        async for _ in stream_audio_chunks(
+            mock_service, request, MagicMock(), writer, "test_voice"
+        ):
             pass
 
     writer.close()

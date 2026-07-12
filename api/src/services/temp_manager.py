@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import time
 from typing import List, Optional
 
 import aiofiles
@@ -36,10 +37,15 @@ async def cleanup_temp_files() -> None:
         # 1. They're too old
         # 2. We have too many files
         # 3. Directory is too large
-        current_time = (await aiofiles.os.stat(settings.temp_file_dir)).st_mtime
+        current_time = time.time()
         max_age = settings.max_temp_dir_age_hours * 3600
+        # Files are sorted oldest-first, so only the first `overflow` entries
+        # are beyond the count cap; deleting on the raw count would wipe the
+        # newest files too, including ones whose download links were just
+        # handed to clients.
+        overflow = len(files) - settings.max_temp_dir_count
 
-        for path, mtime, size in files:
+        for index, (path, mtime, size) in enumerate(files):
             should_delete = False
 
             # Check age
@@ -48,7 +54,7 @@ async def cleanup_temp_files() -> None:
                 logger.info(f"Deleting old temp file: {path}")
 
             # Check count limit
-            elif len(files) > settings.max_temp_dir_count:
+            elif index < overflow:
                 should_delete = True
                 logger.info(f"Deleting excess temp file: {path}")
 
@@ -101,15 +107,16 @@ class TempFileWriter:
             self.temp_path = temp.name
             temp.close()  # Close sync file, we'll use async version
 
-            # Generate download path immediately
-            self.download_path = f"/download/{os.path.basename(self.temp_path)}"
+            # Generate download path immediately. The download route lives on
+            # the OpenAI router, which is mounted under the /v1 prefix.
+            self.download_path = f"/v1/download/{os.path.basename(self.temp_path)}"
         except Exception as e:
             # Handle permission issues or other errors gracefully
             logger.error(f"Failed to create temp file: {e}")
             self._write_error = True
             # Set a placeholder path so the API can still function
             self.temp_path = f"unavailable_{self.format}"
-            self.download_path = f"/download/{self.temp_path}"
+            self.download_path = f"/v1/download/{self.temp_path}"
 
         return self
 

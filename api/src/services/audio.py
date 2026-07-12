@@ -11,7 +11,6 @@ import scipy.io.wavfile as wavfile
 import soundfile as sf
 from loguru import logger
 from pydub import AudioSegment
-from torch import norm
 
 from ..core.config import settings
 from ..inference.base import AudioChunk
@@ -23,7 +22,7 @@ class AudioNormalizer:
 
     def __init__(self):
         self.chunk_trim_ms = settings.gap_trim_ms
-        self.sample_rate = 24000  # Sample rate of the audio
+        self.sample_rate = settings.sample_rate
         self.samples_to_trim = int(self.chunk_trim_ms * self.sample_rate / 1000)
         self.samples_to_pad_start = int(50 * self.sample_rate / 1000)
 
@@ -76,22 +75,18 @@ class AudioNormalizer:
         amplitude_threshold = np.iinfo(audio_data.dtype).max * (
             10 ** (silence_threshold_db / 20)
         )
-        # Find the first samples above the silence threshold at the start and end of the audio
-        non_silent_index_start, non_silent_index_end = None, None
-
-        for X in range(0, len(audio_data)):
-            if abs(int(audio_data[X])) > amplitude_threshold:
-                non_silent_index_start = X
-                break
-
-        for X in range(len(audio_data) - 1, -1, -1):
-            if abs(int(audio_data[X])) > amplitude_threshold:
-                non_silent_index_end = X
-                break
+        # Find the first samples above the silence threshold at the start and
+        # end of the audio (int32 to avoid overflow on abs of int16 min).
+        non_silent = np.flatnonzero(
+            np.abs(audio_data.astype(np.int32)) > amplitude_threshold
+        )
 
         # Handle the case where the entire audio is silent
-        if non_silent_index_start == None or non_silent_index_end == None:
+        if non_silent.size == 0:
             return 0, len(audio_data)
+
+        non_silent_index_start = int(non_silent[0])
+        non_silent_index_end = int(non_silent[-1])
 
         return max(non_silent_index_start - self.samples_to_pad_start, 0), min(
             non_silent_index_end + math.ceil(samples_to_pad_end / speed),
@@ -178,7 +173,9 @@ class AudioService:
                     audio_chunk, chunk_text, speed, is_last_chunk, normalizer
                 )
 
-            # Write audio data first
+            # Write audio data first. An empty chunk (e.g. a sub-sample pause)
+            # produces no encoder output but must not leave chunk_data unbound.
+            chunk_data = b""
             if len(audio_chunk.audio) > 0:
                 chunk_data = writer.write_chunk(audio_chunk.audio)
 
@@ -243,6 +240,6 @@ class AudioService:
 
         if audio_chunk.word_timestamps is not None:
             for timestamp in audio_chunk.word_timestamps:
-                timestamp.start_time -= trimed_samples / 24000
-                timestamp.end_time -= trimed_samples / 24000
+                timestamp.start_time -= trimed_samples / normalizer.sample_rate
+                timestamp.end_time -= trimed_samples / normalizer.sample_rate
         return audio_chunk
