@@ -30,7 +30,7 @@ bare-metal install path.
 | NVIDIA Jetson Orin (arm64, JetPack 6) | `ghcr.io/forgeguard/kokoro-server-jetson:latest` |
 | AMD (ROCm), Intel | planned — see [Roadmap](#roadmap) |
 
-`:latest` works, but pin a release tag (e.g. `:1.1.0`) for stable deployments.
+`:latest` works, but pin a release tag (e.g. `:1.0.1`) for stable deployments.
 
 <div align="center">
   <img src="assets/forgeguard-kokoro-server-web-ui.png" width="85%" alt="ForgeGuard Kokoro Server web console">

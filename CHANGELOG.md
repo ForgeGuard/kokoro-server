@@ -6,11 +6,22 @@ based on [Keep a Changelog](https://keepachangelog.com/) and this project follow
 
 Per-PR attribution and contributor credits are published automatically on the corresponding GitHub release page; this file is the curated, human-readable summary.
 
-## [1.1.0] - 2026-07-10
+## [1.0.1] - 2026-07-12
 
-Orchestrator-ready startup, container-only distribution, and full fork identity.
+First ForgeGuard release. Versioning starts at `1.0.1`; entries below the
+"Pre-1.0 (upstream)" heading are the inherited upstream history for reference.
 
 ### Added
+- Optional API-key authentication. Set `API_KEY` to require
+  `Authorization: Bearer <key>` on the `/v1`, `/dev`, and `/debug` routers; the
+  health check and web console stay open. Unset leaves the server open
+  (unchanged default).
+- New web console: a modern Vite + React + TypeScript + Tailwind TTS interface
+  served at `/web`, with light/dark themes, an in-app API-key dialog, a
+  warming-status banner, voice search with language grouping, format/speed
+  controls, and a download button.
+- Jetson (arm64) container image (`docker/jetson/Dockerfile`), published as
+  `ghcr.io/forgeguard/kokoro-server-jetson`.
 - `GET /ready` readiness endpoint: 200 only once the model is warmed, 503 with
   `Retry-After` otherwise — the strict counterpart to `/health` for Kubernetes
   probes and deploy tooling.
@@ -30,98 +41,98 @@ Orchestrator-ready startup, container-only distribution, and full fork identity.
   created; Helm chart published as OCI to `ghcr.io/forgeguard/charts`.
 - `NOTICE` file with Apache-2.0 attribution for the upstream project, the
   Kokoro-82M model, and StyleTTS2.
-- Web console: warming-status banner, voice search with language grouping,
-  format/speed controls, and download button.
 
 ### Changed
 - **Non-blocking startup.** The server accepts connections (and answers
   `/health`) immediately; model load + warmup runs as a background task. A
   permanently failed warmup exits the container non-zero so orchestrators see
   the failure.
-- **BREAKING:** Helm chart renamed `kokoro-fastapi` → `kokoro-server`
-  (`charts/kokoro-server`, chart version 1.1.0). Selector labels change with
-  the name, so existing installs must be uninstalled and reinstalled, not
-  upgraded. Probes redesigned around the new contract (`startupProbe` +
-  `readinessProbe` on `/ready`, `livenessProbe` on `/health`), image defaults
-  to `ghcr.io/forgeguard/kokoro-server` pinned to the chart appVersion, and API
+- Helm chart renamed `kokoro-fastapi` → `kokoro-server` (`charts/kokoro-server`).
+  Probes are built around the health contract (`startupProbe` + `readinessProbe`
+  on `/ready`, `livenessProbe` on `/health`), image defaults to
+  `ghcr.io/forgeguard/kokoro-server` pinned to the chart appVersion, and API
   keys can be injected from a Secret via `kokoroTTS.apiKey.existingSecret`.
-- **BREAKING:** bare-metal run support removed — distribution is container
-  images + Helm chart only. Deleted the `start-*.sh`/`.ps1` scripts, `examples/`,
-  `dev/`, `debug.http`, `scripts/fix_misaki.py`, root `package.json`, and the
-  local-install documentation; `CONTRIBUTING.md` rewritten container-first.
-- Model weights now download (at image build) from the canonical
-  Hugging Face `hexgrad/Kokoro-82M` repo with a pinned SHA-256, instead of the
-  upstream fork's GitHub release. Override with `MODEL_DOWNLOAD_BASE_URL`.
-- Default log levels quieted from `DEBUG` to `INFO` (`API_LOG_LEVEL`,
-  `UVICORN_LOG_LEVEL`).
-- README rewritten around the container/Helm workflow with the health contract,
-  environment reference, and attribution; project identity is now
-  "ForgeGuard Kokoro Server" (upstream banner and badges removed).
-- Integration test harness gates on real readiness (`/ready` /
-  `status == "healthy"`) instead of any 200 from `/health`, and its compose
-  file no longer references the removed CPU Dockerfile.
-
-### Fixed
-- Missing model files at startup exited the container with code 0
-  (`exit(0)`), causing a silent restart loop under `--restart unless-stopped`.
-  Warmup failures now raise and terminate with a non-zero exit code.
-- Requests arriving mid-warmup could reach a backend whose weights were still
-  loading and fail with a 500 (or mid-stream) — now cleanly rejected with 503.
-- Removed the unauthenticated stray `/v1/test` route.
-
-## [1.0.0] - 2026-07-04
-
-First ForgeGuard release. Versioning resets to `1.0.0`; entries below the
-"Pre-1.0 (upstream)" heading are the inherited upstream history for reference.
-
-### Added
-- Optional API-key authentication. Set `API_KEY` to require
-  `Authorization: Bearer <key>` on the `/v1`, `/dev`, and `/debug` routers; the
-  health check and web console stay open. Unset leaves the server open
-  (unchanged default).
-- New web console: a modern Vite + React + TypeScript + Tailwind TTS interface
-  served at `/web`, with light/dark themes and an in-app API-key dialog.
-- Jetson (arm64) container image (`docker/jetson/Dockerfile`), published as
-  `ghcr.io/forgeguard/kokoro-server-jetson`.
-
-### Changed
+- Distribution is container images + Helm chart only; no bare-metal run path.
 - Container lineup simplified to two images: an amd64 CUDA **cu128** image
-  (`-cu128`, covering RTX 3000 through RTX 5000 in one build) and the new Jetson
+  (`-cu128`, covering RTX 3000 through RTX 5000 in one build) and the Jetson
   image. CPU, ROCm, and generic-arm64 variants were removed.
 - Dependencies modernized: PyTorch `2.8.0` → `2.9.0`, FastAPI `0.115.6` →
   `0.139.0`, Pydantic `2.10.4` → `2.13.4`, plus uvicorn/pydantic-settings.
+- Model weights download (at image build) from the canonical Hugging Face
+  `hexgrad/Kokoro-82M` repo with a pinned SHA-256, and are baked into the
+  image — the container runs fully offline once pulled (`HF_HUB_OFFLINE=1`
+  and telemetry disabled; a preflight check gives a clear error if a volume
+  mount shadows the baked weights).
 - Release pipeline replaced `docker buildx bake` + multi-arch manifests with
   tag-triggered `docker/build-push-action` jobs publishing to
   `ghcr.io/forgeguard/kokoro-server-*`. The GitHub Release lists image
   tags/digests and pull commands.
 - CORS no longer pairs a wildcard origin with `allow_credentials=True`
   (`cors_allow_credentials` defaults to `False`).
-- Model download (`download_model.py`/`.sh`) now uses a timeout, retry with
-  backoff, an overridable base URL, and optional SHA-256 verification.
+- Default log levels quieted from `DEBUG` to `INFO` (`API_LOG_LEVEL`,
+  `UVICORN_LOG_LEVEL`).
+- README rewritten around the container/Helm workflow with the health contract,
+  environment reference, and attribution; project identity is now
+  "ForgeGuard Kokoro Server" (upstream banner and badges removed).
+- Integration test harness gates on real readiness (`/ready` /
+  `status == "healthy"`) instead of any 200 from `/health`.
+- The blocking TTS inference and phonemization loop now runs on a worker
+  thread instead of the event loop, so a single generation no longer stalls
+  concurrent requests, `/health`, or client-disconnect handling.
+- `default_volume_multiplier` acts as a true default: an explicit per-request
+  `volume_multiplier` now overrides it instead of stacking multiplicatively.
 
 ### Removed
-- Legacy Gradio UI (`ui/`) and the vanilla-JS web player, superseded by the new
+- Legacy Gradio UI (`ui/`) and the vanilla-JS web player, superseded by the
   React console.
-- `docker-bake.hcl`, the CPU/ROCm Docker build dirs, and the `test_build` /
-  `test_client_image` workflows.
+- `docker-bake.hcl`, the CPU/ROCm Docker build dirs, the `test_build` /
+  `test_client_image` workflows, and the `start-*.sh`/`.ps1` scripts,
+  `examples/`, `dev/`, `debug.http`, `scripts/fix_misaki.py`, root
+  `package.json`, and local-install documentation.
+- `/debug/session_pools`: dead code inspecting an ONNX session-pool field the
+  Kokoro-V1 backend never has.
 
 ### Fixed
 - **Security:** path traversal / arbitrary file read in the `/web` and
-  `/v1/download` file-serving paths (`_find_file` now rejects absolute paths and
-  `..` escapes).
-- CUDA OOM retry no longer emits a duplicate audio stream followed by a spurious
-  500 after a successful retry.
-- List-form `voice` input (e.g. `["af_bella","af_sky"]`) and empty/whitespace
-  voice input now parse correctly instead of raising a 500.
-- `/dev/unload` no longer races in-flight generation (waits for active requests
-  before freeing the model).
-- Non-streaming responses no longer leak the audio writer; missing web/download
-  files return 404 instead of 500; `/debug/session_pools` no longer 500s.
-
-### Known limitations
-- The synchronous TTS generation loop still runs on the event loop; offloading it
-  to a worker thread is deferred pending on-hardware (GPU) validation of the
-  streaming path.
+  `/v1/download` file-serving paths (`_find_file` now rejects absolute paths
+  and `..` escapes).
+- Missing model files at startup exited the container with code 0
+  (`exit(0)`), causing a silent restart loop under `--restart unless-stopped`.
+  Warmup failures now raise and terminate with a non-zero exit code.
+- Requests arriving mid-warmup could reach a backend whose weights were still
+  loading and fail with a 500 (or mid-stream) — now cleanly rejected with 503.
+- A failed model load left the server permanently wedged ("Model not loaded")
+  instead of retrying; a concurrent request could also grab a half-initialized
+  backend mid-load.
+- CUDA OOM retry no longer emits a duplicate audio stream, drops word
+  timestamps, or raises a spurious 500 after a successful retry.
+- `/dev/unload` no longer races in-flight generation, including the
+  phoneme-based generation endpoint that previously bypassed the guard.
+- Per-chunk generation failures no longer return a silently truncated
+  HTTP 200; a `null` `volume_multiplier` no longer crashes generation.
+- List-form `voice` input (e.g. `["af_bella","af_sky"]`), empty/whitespace
+  voice input, and a single weighted voice (e.g. `af_bella(2)`) now parse
+  correctly instead of raising a 500.
+- Temp-file cleanup no longer deletes every file (including ones just handed
+  out as download links) once the file-count cap is exceeded, and no longer
+  freezes on an idle server; `X-Download-Path` now points at the real
+  `/v1/download/...` route; `download_format` now actually re-encodes the
+  download instead of just renaming the file.
+- Non-English (CJK) text is tokenized with the correct language during chunk
+  packing instead of always using English phonemization; Mandarin ('z')
+  phonemization uses the correct espeak-ng language code.
+- `100 F` no longer normalizes to "100 farads" (duplicate unit-table key);
+  very large numbers no longer crash text normalization.
+- `/v1/audio/voices/combine` now honors weighted voice syntax and no longer
+  leaks a file into `/tmp` on every call.
+- `/v1/models` and `/v1/models/{id}` no longer disagree on which models exist.
+- Non-streaming responses no longer leak the audio writer; missing
+  web/download files return 404 instead of 500; the streaming audio writer no
+  longer leaks a PyAV encoder/buffer on client disconnect.
+- Removed the unauthenticated stray `/v1/test` route.
+- The Helm chart's `HorizontalPodAutoscaler` used a removed Kubernetes API
+  version and targeted the wrong Deployment name; `helm test` targeted the
+  wrong Service name.
 
 ---
 

@@ -1,6 +1,6 @@
 [project]
 name = "kokoro-server"
-version = "1.1.0"
+version = "1.0.1"
 description = "Container-native OpenAI-compatible TTS server built on Kokoro-82M"
 readme = "README.md"
 requires-python = ">=3.10"
