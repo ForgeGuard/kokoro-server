@@ -11,5 +11,5 @@ spec:
     - name: wget
       image: busybox
       command: ['wget']
-      args: ['{{ include "kokoro-server.fullname" . }}:{{ .Values.kokoroTTS.port }}']
+      args: ['{{ include "kokoro-server.fullname" . }}-kokoro-tts-service:{{ .Values.kokoroTTS.port }}']
   restartPolicy: Never

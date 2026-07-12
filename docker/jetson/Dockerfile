@@ -75,11 +75,14 @@ RUN if [ "$INCLUDE_JAPANESE" = "true" ]; then \
 COPY --chown=appuser:appuser api ./api
 COPY --from=webbuild --chown=appuser:appuser /web/dist ./web
 COPY --chown=appuser:appuser VERSION ./VERSION
+COPY --chown=appuser:appuser LICENSE NOTICE ./
 COPY --chown=appuser:appuser docker/scripts/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh && chown -R appuser:appuser /app
 
 USER appuser
 
+# HF_HUB_OFFLINE etc.: model + voices are baked into the image; force any
+# latent Hugging Face hub fallback to fail fast offline instead of phoning home.
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app:/app/api \
@@ -89,6 +92,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PHONEMIZER_ESPEAK_DATA=/usr/share/espeak-ng-data \
     ESPEAK_DATA_PATH=/usr/share/espeak-ng-data \
     DEVICE="gpu" \
-    LD_LIBRARY_PATH="/app/.venv/lib/python3.10/site-packages/nvidia/cu12/lib:${LD_LIBRARY_PATH}"
+    LD_LIBRARY_PATH="/app/.venv/lib/python3.10/site-packages/nvidia/cu12/lib:${LD_LIBRARY_PATH}" \
+    HF_HUB_OFFLINE=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    DO_NOT_TRACK=1
 
 CMD ["./entrypoint.sh"]

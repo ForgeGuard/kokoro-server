@@ -48,6 +48,9 @@ docker run -d --name kokoro --runtime nvidia -p 8880:8880 \
   ghcr.io/forgeguard/kokoro-server-jetson:latest
 ```
 
+Prefer Compose? [`docker/gpu/docker-compose.prod.yml`](docker/gpu/docker-compose.prod.yml)
+is the offline-capable pull-and-run path (published image, baked weights, no source mounts).
+
 Then:
 
 ```bash

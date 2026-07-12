@@ -1,0 +1,25 @@
+# PROD compose file: pulls the published image and runs it as-is. No api bind
+# mount and no DOWNLOAD_MODEL — the model weights are baked into the image, so
+# this path is offline-capable (pull once, run anywhere). For local development
+# (source mount + re-download) use docker-compose.yml instead.
+name: kokoro-server-gpu
+services:
+  kokoro-tts:
+    # Published image (amd64, cu128 — RTX 3000 through RTX 5000):
+    image: ghcr.io/forgeguard/kokoro-server:latest
+    user: "1001:1001"  # Ensure container runs as UID 1001 (appuser)
+    ports:
+      - "8880:8880"
+    environment:
+      - USE_GPU=true
+      - PYTHONUNBUFFERED=1
+      # Set API_KEY to require `Authorization: Bearer <key>` on API requests.
+      # Leave unset to keep the server open. Health + web UI stay reachable.
+      # - API_KEY=change-me
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

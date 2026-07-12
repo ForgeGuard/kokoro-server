@@ -1,3 +1,7 @@
+# DEV compose file: builds from source, bind-mounts ../../api over /app/api
+# (shadowing the model weights baked into the image — hence DOWNLOAD_MODEL=true
+# so the container re-downloads them at start). For a production, offline-capable
+# pull-and-run setup use docker-compose.prod.yml instead.
 name: kokoro-server-gpu
 services:
   kokoro-tts:

@@ -85,61 +85,34 @@ def update_helm_chart(version: str):
         else:
             print(f"Warning: 'version:' pattern not found in {HELM_CHART_FILE}")
 
-        # Update 'appVersion:' line (quoted or unquoted)
-        # Looks for 'appVersion:' followed by optional whitespace, optional quote, the version, optional quote
-        app_version_pattern = r"^(appVersion:\s*)(\"?)([^\"\s]+)(\"?)"
+        # Update 'appVersion:' line — always normalize the whole line to
+        # appVersion: "X.Y.Z" (quoted), regardless of current quoting.
+        app_version_pattern = r"^appVersion:[ \t]*(\S+)[ \t]*$"
         current_app_version_match = re.search(
             app_version_pattern, content, flags=re.MULTILINE
         )
 
         if current_app_version_match:
-            leading_whitespace = current_app_version_match.group(
-                1
-            )  # e.g., "appVersion: "
-            opening_quote = current_app_version_match.group(2)  # e.g., '"' or ''
-            current_app_ver = current_app_version_match.group(3)  # e.g., '0.2.0'
-            closing_quote = current_app_version_match.group(4)  # e.g., '"' or ''
+            original_display = current_app_version_match.group(1)  # e.g. '"0.2.0"'
+            target_display = f'"{version}"'
+            new_line = f"appVersion: {target_display}"
 
-            # Check if quotes were consistent (both present or both absent)
-            if opening_quote != closing_quote:
+            if current_app_version_match.group(0) == new_line:
                 print(
-                    f"Warning: Inconsistent quotes found for appVersion in {HELM_CHART_FILE}. Skipping update for this line."
-                )
-            elif (
-                current_app_ver == version and opening_quote == '"'
-            ):  # Check if already correct *and* quoted
-                print(
-                    f"Already up-to-date: 'appVersion' in {HELM_CHART_FILE} is \"{version}\""
+                    f"Already up-to-date: 'appVersion' in {HELM_CHART_FILE} is {target_display}"
                 )
             else:
-                # Always replace with the quoted version
-                replacement = f'{leading_whitespace}"{version}"'  # Ensure quotes
-                original_display = f"{opening_quote}{current_app_ver}{closing_quote}"  # How it looked before
-                target_display = f'"{version}"'  # How it should look
-
-                # Only report update if the displayed value actually changes
-                if original_display != target_display:
-                    content = re.sub(
-                        app_version_pattern,
-                        replacement,
-                        content,
-                        count=1,
-                        flags=re.MULTILINE,
-                    )
-                    print(
-                        f"Updating 'appVersion' in {HELM_CHART_FILE} from {original_display} to {target_display}"
-                    )
-                    updated_count += 1
-                else:
-                    # It matches the target version but might need quoting fixed silently if we didn't update
-                    # Or it was already correct. Check if content changed. If not, report up-to-date.
-                    if not (
-                        content != original_content and updated_count > 0
-                    ):  # Avoid double message if version also changed
-                        print(
-                            f"Already up-to-date: 'appVersion' in {HELM_CHART_FILE} is {target_display}"
-                        )
-
+                content = re.sub(
+                    app_version_pattern,
+                    new_line,
+                    content,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+                print(
+                    f"Updating 'appVersion' in {HELM_CHART_FILE} from {original_display} to {target_display}"
+                )
+                updated_count += 1
         else:
             print(f"Warning: 'appVersion:' pattern not found in {HELM_CHART_FILE}")
 
@@ -155,42 +128,42 @@ def update_helm_chart(version: str):
         print(f"Error processing {HELM_CHART_FILE}: {e}")
 
 
-def update_readme(version_with_v: str):
-    """Updates Docker image tags in README.md"""
+def update_readme(version: str):
+    """Updates pinned Docker image tags in README.md.
+
+    Releases publish plain X.Y.Z tags (no 'v' prefix). Only version-pinned
+    tags are rewritten — ':latest' references are intentional and left alone.
+    """
     if not README_FILE.exists():
         print(f"Skipping: {README_FILE} not found.")
         return
 
     try:
         content = README_FILE.read_text()
-        # Regex to find and capture pinned ghcr.io/forgeguard/kokoro-server[-variant]:vX.Y.Z tags
-        pattern = r"(ghcr\.io/forgeguard/kokoro-server(?:-cu128|-jetson)?):(v\d+\.\d+\.\d+)"
+        original_content = content
+
+        # Pinned ghcr.io/forgeguard/kokoro-server[-variant]:X.Y.Z (or :vX.Y.Z) tags
+        pattern = (
+            r"(ghcr\.io/forgeguard/kokoro-server(?:-cu128|-jetson)?):(v?\d+\.\d+\.\d+)"
+        )
         matches = list(re.finditer(pattern, content))  # Find all occurrences
 
-        if not matches:
+        if matches:
+            if any(match.group(2) != version for match in matches):
+                content = re.sub(pattern, rf"\1:{version}", content)
+
+        # Prose pin example, e.g.: pin a release tag (e.g. `:1.1.0`)
+        prose_pattern = r"(pin a release tag \(e\.g\. `:)v?\d+\.\d+\.\d+(`\))"
+        content = re.sub(prose_pattern, rf"\g<1>{version}\g<2>", content)
+
+        if not matches and not re.search(prose_pattern, original_content):
             print(f"Warning: Docker image tag pattern not found in {README_FILE}")
+        elif content != original_content:
+            README_FILE.write_text(content)
+            print(f"Updated Docker image tags in {README_FILE} to {version}")
         else:
-            updated_needed = False
-            for match in matches:
-                current_tag = match.group(2)
-                if current_tag != version_with_v:
-                    updated_needed = True
-                    break  # Only need one mismatch to trigger update
-
-            if updated_needed:
-                # Perform replacement on all occurrences
-                new_content = re.sub(pattern, rf"\1:{version_with_v}", content)
-                README_FILE.write_text(new_content)
-                print(f"Updated Docker image tags in {README_FILE} to {version_with_v}")
-            else:
-                print(
-                    f"Already up-to-date: Docker image tags in {README_FILE} (version {version_with_v})"
-                )
-
-        # Check for ':latest' tag usage remains the same
-        if ":latest" in content:
             print(
-                f"Warning: Found ':latest' tag in {README_FILE}. Consider updating manually if needed."
+                f"Already up-to-date: Docker image tags in {README_FILE} (version {version})"
             )
 
     except Exception as e:
@@ -217,14 +190,10 @@ def main():
     print(f"Read version: {version} from {VERSION_FILE}")
     print("-" * 20)
 
-    # Prepare versions (with and without 'v')
-    version_plain = version
-    version_with_v = f"v{version}"
-
-    # Update files
-    update_pyproject(version_plain)
-    update_helm_chart(version_plain)
-    update_readme(version_with_v)
+    # Update files (releases publish plain X.Y.Z tags — no 'v' prefix)
+    update_pyproject(version)
+    update_helm_chart(version)
+    update_readme(version)
 
     print("-" * 20)
     print("Version update script finished.")
