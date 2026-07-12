@@ -24,9 +24,14 @@ export async function fetchServerStatus(): Promise<{
     const url = await api.apiUrl('/health')
     const res = await fetch(url, { headers: { Accept: 'application/json' } })
     const body = (await res.json()) as HealthResponse
-    if (body.status === 'healthy') return { status: 'healthy' }
-    if (body.status === 'warming') return { status: 'warming' }
-    return { status: 'failed', error: body.error }
+    // 'failed' is the server's genuine pre-restart signal; it arrives as a
+    // 503, so honor it regardless of res.ok.
+    if (body.status === 'failed') return { status: 'failed', error: body.error }
+    if (res.ok && body.status === 'healthy') return { status: 'healthy' }
+    if (res.ok && body.status === 'warming') return { status: 'warming' }
+    // Anything else (unknown shape, gateway JSON error bodies) is not a
+    // definitive answer from the server — keep polling.
+    return { status: 'unreachable' }
   } catch {
     return { status: 'unreachable' }
   }

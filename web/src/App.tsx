@@ -14,6 +14,7 @@ import {
   type ServerStatus,
 } from './lib/health'
 import {
+  AUDIO_FORMATS,
   fetchVoices,
   generateSpeech,
   type AudioFormat,
@@ -33,14 +34,20 @@ import {
   useToast,
 } from './ui'
 
-const FORMATS: { value: AudioFormat; label: string }[] = [
-  { value: 'mp3', label: 'MP3' },
-  { value: 'wav', label: 'WAV' },
-  { value: 'opus', label: 'Opus' },
-  { value: 'flac', label: 'FLAC' },
-  { value: 'aac', label: 'AAC' },
-  { value: 'pcm', label: 'PCM' },
-]
+// Display labels for the formats defined in lib/ttsApi.ts (single source).
+const FORMAT_LABELS: Record<AudioFormat, string> = {
+  mp3: 'MP3',
+  wav: 'WAV',
+  opus: 'Opus',
+  flac: 'FLAC',
+  aac: 'AAC',
+  pcm: 'PCM',
+}
+
+const FORMATS = AUDIO_FORMATS.map((value) => ({
+  value,
+  label: FORMAT_LABELS[value],
+}))
 
 const SAMPLE_TEXT =
   'The quick brown fox jumps over the lazy dog. Kokoro turns this text into natural speech.'
@@ -116,26 +123,26 @@ export default function App() {
 
   // Track model warmup: poll /health until it reports healthy. Re-armed by
   // setting serverStatus back to 'warming' (e.g. on a model_warming 503).
+  // 'failed' is NOT terminal: the container typically restarts, so keep
+  // polling and flip back to healthy once the server recovers.
   useEffect(() => {
-    if (serverStatus === 'healthy' || serverStatus === 'failed') return
+    if (serverStatus === 'healthy') return
     let alive = true
     let timer: number | undefined
     const poll = async () => {
       const { status, error } = await fetchServerStatus()
       if (!alive) return
       if (status === 'healthy') {
-        if (serverStatus === 'warming') {
+        if (serverStatus === 'warming' || serverStatus === 'failed') {
           toast.success('Model ready', 'Warmup complete.')
         }
         setServerStatus('healthy')
         return
       }
-      if (status === 'failed') {
-        setServerStatus('failed')
+      if (status === 'failed' && serverStatus !== 'failed') {
         toast.error('Model failed to load', error ?? 'Check the server logs.')
-        return
       }
-      setServerStatus(status) // 'warming' | 'unreachable'
+      setServerStatus(status) // 'warming' | 'unreachable' | 'failed'
       timer = window.setTimeout(poll, 3000)
     }
     void poll()

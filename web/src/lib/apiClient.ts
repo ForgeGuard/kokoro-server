@@ -42,10 +42,19 @@ class ApiClient {
   /** Detect the root path from the current URL by stripping a trailing /web. */
   private detectRootPath(): void {
     const currentPath = window.location.pathname
+    // Match the LAST '/web' path SEGMENT (i.e. followed by '/' or end of
+    // string), scanning backwards. A plain indexOf would mis-anchor on
+    // prefixes that merely start with 'web' (e.g. '/webtools/web/' or
+    // '/proxy/website/web/' must yield '/webtools' / '/proxy/website').
     let root = ''
-    if (currentPath.includes('/web/') || currentPath.endsWith('/web')) {
-      const webIndex = currentPath.indexOf('/web')
-      root = currentPath.substring(0, webIndex)
+    let idx = currentPath.lastIndexOf('/web')
+    while (idx !== -1) {
+      const after = currentPath.charAt(idx + 4)
+      if (after === '' || after === '/') {
+        root = currentPath.substring(0, idx)
+        break
+      }
+      idx = idx > 0 ? currentPath.lastIndexOf('/web', idx - 1) : -1
     }
     this.rootPath = root.replace(/\/$/, '')
   }
@@ -59,7 +68,11 @@ class ApiClient {
       if (res.ok) {
         const cfg = (await res.json()) as WebConfig
         if (typeof cfg.root_path === 'string') {
-          this.rootPath = cfg.root_path.replace(/\/$/, '')
+          // Only override the URL-detected prefix when the server actually
+          // configures one — an empty root_path (server unaware of an
+          // upstream reverse proxy) must not clobber the detected value.
+          const configured = cfg.root_path.replace(/\/$/, '')
+          if (configured) this.rootPath = configured
         }
         if (typeof cfg.version === 'string') {
           this.version = cfg.version

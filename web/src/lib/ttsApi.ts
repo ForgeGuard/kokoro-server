@@ -1,6 +1,8 @@
 import { api } from './apiClient'
 
-export type AudioFormat = 'mp3' | 'wav' | 'opus' | 'flac' | 'aac' | 'pcm'
+/** Supported output formats — single source of truth for the AudioFormat type. */
+export const AUDIO_FORMATS = ['mp3', 'wav', 'opus', 'flac', 'aac', 'pcm'] as const
+export type AudioFormat = (typeof AUDIO_FORMATS)[number]
 
 export interface SpeechRequest {
   model: string
