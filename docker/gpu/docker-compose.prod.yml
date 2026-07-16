@@ -6,7 +6,7 @@ name: kokoro-server-gpu
 services:
   kokoro-tts:
     # Published image (amd64, cu128 — RTX 3000 through RTX 5000):
-    image: ghcr.io/forgeguard/kokoro-server:latest
+    image: ghcr.io/forgeguard-ai/kokoro-server:latest
     user: "1001:1001"  # Ensure container runs as UID 1001 (appuser)
     ports:
       - "8880:8880"

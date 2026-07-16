@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AppShell } from './components/AppShell'
+import { GpuMonitor } from './components/GpuMonitor'
 import { SettingsDialog } from './components/SettingsDialog'
 import { AudioPlayer } from './components/tts/AudioPlayer'
 import {
@@ -65,6 +66,7 @@ export default function App() {
   const [authRequired, setAuthRequired] = useState(false)
 
   const [voices, setVoices] = useState<string[]>([])
+  const [voicesError, setVoicesError] = useState(false)
   const [selectedVoices, setSelectedVoices] = useState<VoiceSelection[]>([])
   const [text, setText] = useState(SAMPLE_TEXT)
   const [format, setFormat] = useState<AudioFormat>('mp3')
@@ -82,6 +84,12 @@ export default function App() {
     [selectedVoices],
   )
 
+  // Browser-tab title: "<Section> · <App title>", matching the sibling
+  // ForgeGuard consoles. Single-page console, so the section is always "Console".
+  useEffect(() => {
+    document.title = 'Console · ForgeGuard Kokoro Server'
+  }, [])
+
   // Reopen settings automatically on auth failure.
   useEffect(() => {
     return api.onUnauthorized(() => {
@@ -95,12 +103,14 @@ export default function App() {
     try {
       const list = await fetchVoices()
       setAuthRequired(false) // an authenticated (or open) request succeeded
+      setVoicesError(false)
       setVoices(list)
       setSelectedVoices((cur) =>
         cur.length ? cur : list.length ? [{ id: list[0], weight: 1 }] : [],
       )
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return
+      setVoicesError(true)
       toast.error(
         'Could not load voices',
         err instanceof Error ? err.message : String(err),
@@ -198,11 +208,15 @@ export default function App() {
   return (
     <AppShell
       title="ForgeGuard Kokoro Server"
+      section="Console"
       tagline="OpenAI-compatible text-to-speech console"
       mark={<WaveIcon />}
       version={version}
       onOpenSettings={() => setSettingsOpen(true)}
     >
+      <div className="mb-6">
+        <GpuMonitor />
+      </div>
       {warming && ready && (
         <div
           role="status"
@@ -302,12 +316,35 @@ export default function App() {
           <Card>
             <CardHeader title="Voices" />
             <CardBody>
-              <VoicePicker
-                voices={voices}
-                selected={selectedVoices}
-                onChange={setSelectedVoices}
-                disabled={!ready}
-              />
+              {voicesError ? (
+                <div className="flex flex-col items-start gap-2 text-sm">
+                  <span className="text-muted">
+                    Couldn&apos;t load the voice list.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void loadVoices()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : !ready ? (
+                <span className="flex items-center gap-2 text-sm text-muted">
+                  <Spinner /> Loading voices…
+                </span>
+              ) : voices.length === 0 ? (
+                <span className="text-sm text-faint">
+                  No voices available on this server.
+                </span>
+              ) : (
+                <VoicePicker
+                  voices={voices}
+                  selected={selectedVoices}
+                  onChange={setSelectedVoices}
+                  disabled={!ready}
+                />
+              )}
             </CardBody>
           </Card>
 

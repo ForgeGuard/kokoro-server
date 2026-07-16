@@ -4,7 +4,7 @@
 kokoroTTS:
   replicaCount: 1
   # The name of the deployment repository
-  repository: "ghcr.io/forgeguard/kokoro-server"
+  repository: "ghcr.io/forgeguard-ai/kokoro-server"
   imagePullSecrets: [] # Set if using a private image or getting rate limited
   # Defaults to the chart appVersion (a pinned release) when empty.
   tag: ""
@@ -68,16 +68,24 @@ serviceAccount:
 
 podAnnotations: {}
 
-podSecurityContext: {}
-  # fsGroup: 2000
+# The container image runs as a non-root user (uid 1001). These defaults enforce
+# that at the pod/container level and drop all Linux capabilities. fsGroup makes
+# any mounted volume group-writable by that uid.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  # readOnlyRootFilesystem requires a writable mount for OUTPUT_DIR/temp files;
+  # enable per-environment alongside such a volume.
   # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
 
 service:
   type: ClusterIP

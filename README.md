@@ -6,7 +6,8 @@
 
 **ForgeGuard Kokoro Server** is a container-native, OpenAI-compatible
 text-to-speech server built around the
-[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model. Forked from
+[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model. An independent
+ForgeGuard AI server originally derived from
 [remsky/Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)
 (see [Attribution](#license--attribution)).
 
@@ -26,14 +27,14 @@ bare-metal install path.
 
 | Hardware | Image |
 |---|---|
-| NVIDIA RTX 3000 → 5000 series (x86_64, CUDA cu128) | `ghcr.io/forgeguard/kokoro-server:latest` (alias: `kokoro-server-cu128`) |
-| NVIDIA Jetson Orin (arm64, JetPack 6) | `ghcr.io/forgeguard/kokoro-server-jetson:latest` |
+| NVIDIA RTX 3000 → 5000 series (x86_64, CUDA cu128) | `ghcr.io/forgeguard-ai/kokoro-server:latest` (alias: `kokoro-server-cu128`) |
+| NVIDIA Jetson Orin (arm64, JetPack 6) | `ghcr.io/forgeguard-ai/kokoro-server-jetson:latest` |
 | AMD (ROCm), Intel | planned — see [Roadmap](#roadmap) |
 
-`:latest` works, but pin a release tag (e.g. `:1.0.1`) for stable deployments.
+`:latest` works, but pin a release tag (e.g. `:1.1.0`) for stable deployments.
 
 <div align="center">
-  <img src="assets/forgeguard-kokoro-server-web-ui.png" width="85%" alt="ForgeGuard Kokoro Server web console">
+  <img src="assets/forgeguard-kokoro-server-web-ui.png" width="100%" alt="ForgeGuard Kokoro Server web console">
 </div>
 
 ## Quick start
@@ -41,11 +42,11 @@ bare-metal install path.
 ```bash
 # NVIDIA amd64 (RTX 3000 through RTX 5000)
 docker run -d --name kokoro --gpus all -p 8880:8880 \
-  ghcr.io/forgeguard/kokoro-server:latest
+  ghcr.io/forgeguard-ai/kokoro-server:latest
 
 # NVIDIA Jetson (arm64, Orin)
 docker run -d --name kokoro --runtime nvidia -p 8880:8880 \
-  ghcr.io/forgeguard/kokoro-server-jetson:latest
+  ghcr.io/forgeguard-ai/kokoro-server-jetson:latest
 ```
 
 Prefer Compose? [`docker/gpu/docker-compose.prod.yml`](docker/gpu/docker-compose.prod.yml)
@@ -88,13 +89,14 @@ requires `Authorization: Bearer <key>`:
 
 ```bash
 docker run -d --gpus all -p 8880:8880 -e API_KEY=change-me \
-  ghcr.io/forgeguard/kokoro-server:latest
+  ghcr.io/forgeguard-ai/kokoro-server:latest
 
 curl -H 'Authorization: Bearer change-me' http://localhost:8880/v1/models
 ```
 
-`/health`, `/ready`, and the web console stay open (the console stores a key in
-its settings and sends the bearer header for API calls).
+`/health`, `/ready`, `/system` (GPU/activity telemetry for the console monitor),
+and the web console stay open (the console stores a key in its settings and
+sends the bearer header for API calls).
 
 ## Health & readiness contract
 
@@ -129,11 +131,39 @@ for the full list):
 | `API_LOG_LEVEL` | `INFO` | Application (loguru) log level |
 | `UVICORN_LOG_LEVEL` | `info` | Uvicorn server log level |
 | `ENABLE_WEB_PLAYER` | `true` | Serve the web console at `/web` |
+| `TLS_ENABLED` | `false` | Serve HTTPS directly (uvicorn SSL) — see [Built-in HTTPS](#built-in-https) |
+| `TLS_SELF_SIGNED` | `true` | Auto-generate a self-signed cert on first run if none is provided |
+| `TLS_CN` / `TLS_SAN` | `localhost` / *(unset)* | Cert common name and extra SANs (`TLS_SAN` is comma-separated) |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` | `{OUTPUT_DIR}/tls/…` | Point at an existing cert/key instead of self-signing |
+| `OUTPUT_DIR` | `output` | Where generated audio and the self-signed TLS cert are persisted |
 | `CORS_ENABLED` / `CORS_ORIGINS` | `true` / `["*"]` | CORS for browser clients |
 | `TARGET_MIN_TOKENS` / `TARGET_MAX_TOKENS` / `ABSOLUTE_MAX_TOKENS` | `175` / `250` / `450` | Long-form chunking bounds |
 | `DOWNLOAD_MODEL` | *(unset)* | `true` re-downloads weights at container start (they're already baked in) |
 | `MODEL_DOWNLOAD_BASE_URL` | Hugging Face `hexgrad/Kokoro-82M` | Where build/startup fetches weights |
 | `MODEL_SHA256` | pinned for the default URL | Weights checksum verification |
+
+## Built-in HTTPS
+
+Set `TLS_ENABLED=true` and the server speaks HTTPS directly — no reverse proxy,
+no manual `openssl`, no extra container. If no certificate is supplied and
+`TLS_SELF_SIGNED=true` (default), a self-signed cert (RSA 2048, ~10-year
+validity, SANs for `TLS_CN` + `localhost` + loopback + any `TLS_SAN`) is
+generated on first start and persisted under `{OUTPUT_DIR}/tls`, so restarts
+reuse it. Browsers warn on self-signed certs — expected for local/self-hosted
+testing; point `TLS_CERT_FILE` / `TLS_KEY_FILE` at a CA-issued cert for public
+use.
+
+The ready-to-run local single-GPU stack (TLS on, GPU reserved, HTTPS on 8443,
+persistent volume) is:
+
+```bash
+docker compose -f docker/gpu/docker-compose.local.yml up -d --build
+# then open https://localhost:8443/web/
+```
+
+See [`docs/security.md`](docs/security.md) for the full posture and
+[`docs/responsible-use.md`](docs/responsible-use.md) for synthetic-media
+guidance.
 
 ## API overview
 
@@ -267,7 +297,7 @@ is enabled. Disable it with `ENABLE_WEB_PLAYER=false`.
 ## Kubernetes (Helm)
 
 ```bash
-helm install kokoro oci://ghcr.io/forgeguard/charts/kokoro-server --version 1.1.0
+helm install kokoro oci://ghcr.io/forgeguard-ai/charts/kokoro-server --version 1.1.0
 ```
 
 The chart (also in [`charts/kokoro-server`](charts/kokoro-server)) wires the
@@ -349,7 +379,7 @@ or `ffprobe` for exact length.
 This repository is licensed under the [Apache License 2.0](LICENSE); see
 [NOTICE](NOTICE) for required attributions.
 
-- Forked from [remsky/Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)
+- Originally derived from [remsky/Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)
   (Apache 2.0) — the original Dockerized FastAPI wrapper this project builds on.
 - [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model weights by
   [hexgrad](https://github.com/hexgrad) (Apache 2.0), with

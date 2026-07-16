@@ -232,6 +232,11 @@ Model files not found! You need to download the Kokoro V1 model:
         """Get current backend type."""
         return "kokoro_v1"
 
+    @property
+    def inflight(self) -> int:
+        """Number of generations currently using the backend (telemetry)."""
+        return self._inflight
+
 
 async def get_manager(config: Optional[ModelConfig] = None) -> ModelManager:
     """Get model manager instance.

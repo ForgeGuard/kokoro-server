@@ -3,10 +3,11 @@ from importlib.metadata import (
     version as _pkg_version,
 )
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
 import torch
-from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode
 
 
 def _read_version() -> str:
@@ -94,6 +95,43 @@ class Settings(BaseSettings):
     max_temp_dir_size_mb: int = 2048  # Maximum size of temp directory (2GB)
     max_temp_dir_age_hours: int = 1  # Remove temp files older than 1 hour
     max_temp_dir_count: int = 3  # Maximum number of temp files to keep
+
+    # TLS / HTTPS
+    # When TLS_ENABLED is set the server speaks HTTPS directly (uvicorn SSL). If
+    # no cert is provided a self-signed one is generated on first run and
+    # persisted under {output_dir}/tls so restarts reuse it — no reverse proxy,
+    # no manual openssl, no extra container. Point TLS_CERT_FILE / TLS_KEY_FILE
+    # at a real cert for anything public.
+    tls_enabled: bool = False
+    tls_cert_file: Path | None = None  # defaults to {output_dir}/tls/cert.pem
+    tls_key_file: Path | None = None  # defaults to {output_dir}/tls/key.pem
+    tls_self_signed: bool = True  # auto-generate a self-signed cert if missing
+    tls_cn: str = "localhost"  # CN + SAN for the generated certificate
+    tls_san: Annotated[list[str], NoDecode] = Field(
+        default_factory=list
+    )  # extra SANs (comma-separated env, e.g. TLS_SAN="host.local,10.0.0.5")
+
+    @field_validator("tls_san", mode="before")
+    @classmethod
+    def _split_san(cls, v: object) -> object:
+        # Accept a comma-separated string from the environment; NoDecode above
+        # disables pydantic's JSON list parsing so this validator sees the raw
+        # value (mirrors how cors_origins-style lists are typically split).
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        return v
+
+    @property
+    def resolved_tls_cert(self) -> Path:
+        if self.tls_cert_file is not None:
+            return self.tls_cert_file
+        return Path(self.output_dir) / "tls" / "cert.pem"
+
+    @property
+    def resolved_tls_key(self) -> Path:
+        if self.tls_key_file is not None:
+            return self.tls_key_file
+        return Path(self.output_dir) / "tls" / "key.pem"
 
     class Config:
         env_file = ".env"

@@ -23,7 +23,7 @@ drive the host daemon (including its GPU runtime).
   directly on your machine (the containers include them)
 
 ```bash
-git clone https://github.com/ForgeGuard/kokoro-server.git
+git clone https://github.com/forgeguard-ai/kokoro-server.git
 cd kokoro-server
 ```
 

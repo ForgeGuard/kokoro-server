@@ -94,6 +94,8 @@ jobs:
             org.opencontainers.image.title=Kokoro Server (CUDA cu128)
             org.opencontainers.image.description=Kokoro TTS served via FastAPI. amd64 CUDA build (cu128) for NVIDIA RTX 3000 through RTX 5000.
             org.opencontainers.image.version=${{ needs.setup.outputs.version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -131,6 +133,8 @@ jobs:
           labels: |
             org.opencontainers.image.title=Kokoro Server (Jetson)
             org.opencontainers.image.version=${{ needs.setup.outputs.version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
   smoke-amd64:
     # Boots the freshly published amd64 image on the CPU runner and asserts the
@@ -139,6 +143,11 @@ jobs:
     # produces real audio, and API_KEY gating works.
     needs: [setup, build-amd64]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Needed to pull the just-pushed image: new GHCR packages under the
+      # forgeguard-ai org start private, unlike the old org's public packages.
+      packages: read
     steps:
       - name: Free disk space
         run: |
@@ -214,7 +223,7 @@ jobs:
           VERSION: ${{ needs.setup.outputs.version }}
         run: |
           helm package charts/kokoro-server --version "$VERSION" --app-version "$VERSION"
-          helm push "kokoro-server-${VERSION}.tgz" oci://ghcr.io/forgeguard/charts
+          helm push "kokoro-server-${VERSION}.tgz" oci://ghcr.io/forgeguard-ai/charts
 
   create-release:
     needs: [setup, build-amd64, smoke-amd64]
@@ -247,21 +256,27 @@ jobs:
             echo ""
             echo "## Helm chart"
             echo '```'
-            echo "helm install kokoro oci://ghcr.io/forgeguard/charts/kokoro-server --version ${VERSION}"
+            echo "helm install kokoro oci://ghcr.io/forgeguard-ai/charts/kokoro-server --version ${VERSION}"
             echo '```'
             echo ""
             echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/v${VERSION}/CHANGELOG.md) for the curated summary."
           } > body.md
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.setup.outputs.version }}
-          target_commitish: ${{ github.sha }}
-          name: Release v${{ needs.setup.outputs.version }}
-          body_path: body.md
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+      - name: Create or update GitHub Release
+        # gh CLI instead of a Marketplace release action: the org Actions policy
+        # only allows GitHub-authored and verified-creator actions.
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Keep the existing release's auto-generated changelog section.
+            echo "" >> body.md
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body \
+              | awk "/^## What's Changed/{found=1} found{print}" >> body.md
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Release $TAG" --notes-file body.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Release $TAG" --notes-file body.md --generate-notes
+          fi

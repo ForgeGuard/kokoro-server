@@ -8,7 +8,7 @@ set -e
 
 VARIANT=${1:-amd64}
 TAG=${2:-local}
-REPO=${IMAGE_REPO:-ghcr.io/forgeguard/kokoro-server}
+REPO=${IMAGE_REPO:-ghcr.io/forgeguard-ai/kokoro-server}
 
 case "$VARIANT" in
   amd64)

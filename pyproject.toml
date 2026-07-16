@@ -1,6 +1,6 @@
 [project]
 name = "kokoro-server"
-version = "1.0.1"
+version = "1.1.0"
 description = "Container-native OpenAI-compatible TTS server built on Kokoro-82M"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,6 +13,8 @@ dependencies = [
     "pydantic-settings==2.14.2",
     "python-dotenv==1.0.1",
     "sqlalchemy==2.0.27",
+    # Built-in HTTPS: self-signed certificate generation on first run.
+    "cryptography>=42",
     # ML/DL Base
     "numpy>=1.26.0",
     "scipy==1.14.1",
@@ -61,6 +63,9 @@ dependencies = [
 gpu = [
     "torch==2.9.0+cu128 ; platform_machine == 'x86_64'",
     "torch==2.11.0 ; platform_machine == 'aarch64'",
+    # NVML: live GPU utilization/temperature/power telemetry for /system and the
+    # web monitor. Optional — telemetry degrades to torch memory-only if absent.
+    "nvidia-ml-py>=12.535",
     # cuDSS (CUDA direct sparse solver) is a newer CUDA component not bundled
     # in the l4t-jetpack base image and not installable via its apt repos
     # (only stock Ubuntu ports repos are configured there). Pull it from

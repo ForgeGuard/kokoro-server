@@ -1,0 +1,65 @@
+# Local single-GPU deployment (this host: NVIDIA A2, 16 GB).
+#
+# One container serving Kokoro-82M over HTTPS via a self-signed certificate that
+# is generated on first start and persisted in the data volume — no reverse
+# proxy, no manual openssl, no extra containers.
+#
+#   docker compose -f docker/gpu/docker-compose.local.yml up -d --build
+#   open https://localhost:8443/web/
+#
+# The certificate is self-signed, so browsers show a one-time "not trusted"
+# warning — expected for local/self-hosted testing. The model weights are baked
+# into the image, so the container reports healthy within a warmup, not a
+# multi-minute download.
+
+services:
+  kokoro-tts:
+    build:
+      context: ../..
+      dockerfile: docker/gpu/Dockerfile.optimized
+    image: kokoro-server:local
+    ports:
+      # Host port is overridable to avoid collisions when several ForgeGuard
+      # servers run on one box (they all default to 8443). Container port is the
+      # server's 8880.
+      - "${KOKORO_HTTPS_PORT:-8443}:8880"
+    environment:
+      USE_GPU: "true"
+      PYTHONUNBUFFERED: "1"
+      # Persist generated audio + the TLS cert on the named volume.
+      OUTPUT_DIR: /data
+      # HTTPS with an auto-generated self-signed cert persisted under /data/tls.
+      TLS_ENABLED: "true"
+      TLS_SELF_SIGNED: "true"
+      TLS_CN: localhost
+      # TLS_SAN: "kokoro.local,10.0.0.5"   # extra hostnames/IPs in the cert
+      # API_KEY: "change-me"               # protect the API (health/web stay open)
+    volumes:
+      - kokoro-data:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # The image's default HEALTHCHECK speaks HTTP; override it for HTTPS and
+    # accept the self-signed cert. Generous start_period covers model warmup.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import ssl, sys, urllib.request
+          ctx = ssl._create_unverified_context()
+          r = urllib.request.urlopen("https://127.0.0.1:8880/health", context=ctx, timeout=4)
+          sys.exit(0 if r.status == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      start_period: 300s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  kokoro-data:
