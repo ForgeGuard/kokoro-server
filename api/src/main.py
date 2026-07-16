@@ -202,6 +202,27 @@ async def health_check():
     return {"status": "healthy", "model_loaded": status is ModelStatus.READY}
 
 
+@app.get("/system")
+async def system_info():
+    """Live server + GPU + activity telemetry for the web monitor.
+
+    Unauthenticated like /health and /ready: the browser console polls this to
+    render the GPU/activity bar before any API key is entered, and it exposes
+    no secrets — only version, model state, GPU utilization/VRAM/temp/power, and
+    in-flight request counts. GPU fields are null on CPU-only hosts.
+    """
+    from .core.telemetry import activity_info, gpu_info
+
+    status = model_status.get_status()
+    return {
+        "version": settings.api_version,
+        "status": status.value,
+        "gpu": gpu_info(),
+        "activity": activity_info(),
+        "model": model_status.get_metadata(),
+    }
+
+
 @app.get("/ready")
 async def readiness_check():
     """Readiness: 200 only once the model is warmed and synthesis will succeed.
@@ -220,4 +241,14 @@ async def readiness_check():
 
 
 if __name__ == "__main__":
-    uvicorn.run("api.src.main:app", host=settings.host, port=settings.port, reload=True)
+    # Dev launcher (auto-reload). Production uses `python -m api.src.serve`.
+    # Honor TLS_ENABLED here too so `python -m api.src.main` also serves HTTPS.
+    from .serve import tls_kwargs
+
+    uvicorn.run(
+        "api.src.main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=True,
+        **tls_kwargs(),
+    )

@@ -8,6 +8,7 @@ import { GearIcon, IconButton, ThemeToggle } from '../ui'
  */
 export function AppShell({
   title,
+  section,
   tagline,
   mark,
   version,
@@ -15,6 +16,8 @@ export function AppShell({
   children,
 }: {
   title: string
+  /** Current page/section, shown small under the app title. */
+  section?: string
   tagline: string
   mark: ReactNode
   version?: string
@@ -41,6 +44,11 @@ export function AppShell({
                   </span>
                 )}
               </div>
+              {section ? (
+                <p className="text-[0.7rem] font-medium uppercase tracking-wide text-accent">
+                  {section}
+                </p>
+              ) : null}
               <p className="hidden text-xs text-muted sm:block">{tagline}</p>
             </div>
           </div>
