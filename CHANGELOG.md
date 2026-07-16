@@ -6,6 +6,40 @@ based on [Keep a Changelog](https://keepachangelog.com/) and this project follow
 
 Per-PR attribution and contributor credits are published automatically on the corresponding GitHub release page; this file is the curated, human-readable summary.
 
+## [1.1.0] - 2026-07-16
+
+Cross-cutting parity pass to bring this server in line with the sibling
+ForgeGuard inference servers (one look, one deployment story, one quality bar).
+
+### Added
+- **Built-in HTTPS.** Set `TLS_ENABLED=true` to serve HTTPS directly (uvicorn
+  SSL) — no reverse proxy, no manual `openssl`, no extra container. When no cert
+  is provided and `TLS_SELF_SIGNED=true` (default), a self-signed cert (RSA 2048,
+  ~10y validity, SANs for `TLS_CN` + `localhost` + loopback + `TLS_SAN`) is
+  generated on first run and persisted under `{OUTPUT_DIR}/tls` so restarts reuse
+  it. New config: `TLS_ENABLED`, `TLS_SELF_SIGNED`, `TLS_CERT_FILE`,
+  `TLS_KEY_FILE`, `TLS_CN`, `TLS_SAN`. Adds `cryptography` as a dependency.
+- **Live GPU + activity telemetry** on a new open `GET /system` endpoint:
+  GPU name, VRAM used/total, and (via optional `nvidia-ml-py`) utilization,
+  temperature, and power — best-effort, degrading to torch memory or omitting
+  gracefully — plus in-flight request counts. Unauthenticated like `/health`.
+- **GPU + activity monitor in the web console:** a compact, theme-matched bar
+  (GPU/VRAM/temp/power meters + running/queued) polling `/system` every ~3s.
+- **Local single-GPU deploy stack** (`docker/gpu/docker-compose.local.yml`):
+  builds the image, reserves one NVIDIA GPU, enables self-signed TLS, publishes
+  HTTPS on 8443, mounts a persistent data volume, and overrides the healthcheck
+  to speak HTTPS. Plus a complete `.env.example` and `docs/security.md` /
+  `docs/responsible-use.md`.
+- Web console: capability-aware voice states (loading / empty / error+retry) and
+  a two-tier title with the browser tab set to `Console · ForgeGuard Kokoro
+  Server`.
+
+### Changed
+- Container launches via `python -m api.src.serve` (generates + wires the TLS
+  cert before binding); a default HTTP healthcheck is baked into the image.
+- Helm chart now enforces `runAsNonRoot` / `runAsUser` / `fsGroup`, drops all
+  capabilities, and disallows privilege escalation by default.
+
 ## [1.0.1] - 2026-07-12
 
 First ForgeGuard release. Versioning starts at `1.0.1`; entries below the

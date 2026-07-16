@@ -18,4 +18,8 @@ if [ "$DOWNLOAD_MODEL" != "true" ] && [ ! -f "/app/api/src/models/v1_0/kokoro-v1
     exit 1
 fi
 
-exec uv run --extra "${DEVICE:?DEVICE must be set to 'gpu' or 'cpu'}" --no-sync python -m uvicorn api.src.main:app --host 0.0.0.0 --port 8880 --log-level "${UVICORN_LOG_LEVEL:-info}"
+# Launch via api.src.serve (not `uvicorn ... api.src.main:app` directly) so the
+# server can generate + wire a self-signed TLS certificate before binding when
+# TLS_ENABLED is set. With TLS disabled (default) this is the same plain-HTTP
+# launch as before. Host/port/log-level are read from settings / UVICORN_LOG_LEVEL.
+exec uv run --extra "${DEVICE:?DEVICE must be set to 'gpu' or 'cpu'}" --no-sync python -m api.src.serve

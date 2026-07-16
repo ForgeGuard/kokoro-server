@@ -53,8 +53,8 @@ RUN apt-get update -y && \
     mkdir -p /usr/share/espeak-ng-data && \
     ln -s /usr/lib/*/espeak-ng-data/* /usr/share/espeak-ng-data/ && \
     useradd -m -u 1001 appuser && \
-    mkdir -p /app/api/src/models/v1_0 && \
-    chown -R appuser:appuser /app
+    mkdir -p /app/api/src/models/v1_0 /data && \
+    chown -R appuser:appuser /app /data
 
 WORKDIR /app
 
@@ -107,6 +107,12 @@ ENV PATH="/app/.venv/bin:$PATH" \
     HF_HUB_OFFLINE=1 \
     HF_HUB_DISABLE_TELEMETRY=1 \
     DO_NOT_TRACK=1
+
+# Default healthcheck speaks plain HTTP on 8880. Deployments that enable
+# built-in TLS (TLS_ENABLED=true) should override this to speak HTTPS with an
+# unverified context — see docker/gpu/docker-compose.local.yml.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=5 \
+    CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8880/health', timeout=4).status==200 else 1)" || exit 1
 
 # Run FastAPI server
 CMD ["./entrypoint.sh"]
