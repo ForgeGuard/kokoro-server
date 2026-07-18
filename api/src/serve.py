@@ -47,7 +47,10 @@ def main() -> None:
     ssl = tls_kwargs()
     log_level = os.getenv("UVICORN_LOG_LEVEL", "info").lower()
     scheme = "https" if ssl else "http"
-    logger.info(f"Starting Kokoro server on {scheme}://{settings.host}:{settings.port}")
+    logger.info(
+        f"Starting ForgeGuard Kokoro Server v{settings.api_version} "
+        f"on {scheme}://{settings.host}:{settings.port}"
+    )
     uvicorn.run(
         "api.src.main:app",
         host=settings.host,

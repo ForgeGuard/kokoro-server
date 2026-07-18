@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from api.src.core import model_status
 from api.src.core.config import settings
 from api.src.core.model_status import ModelStatus
-from api.src.main import _warmup, app
+from api.src.main import _startup_banner, _warmup, app
 
 client = TestClient(app)
 
@@ -321,3 +321,78 @@ async def test_missing_model_files_raise_instead_of_exit_zero():
     ):
         with pytest.raises(RuntimeError, match="Model files not found"):
             await manager.initialize_with_warmup(voice_manager=AsyncMock())
+
+
+# ---------------------------------------------------------------------------
+# ForgeGuard startup banner
+# ---------------------------------------------------------------------------
+
+CUDA_GPU = {
+    "name": "NVIDIA GeForce RTX 4090",
+    "memory_used_bytes": 2 * 1024**3,
+    "memory_total_bytes": 24 * 1024**3,
+}
+
+
+def test_startup_banner_is_forgeguard_branded():
+    """The banner carries ForgeGuard identity, not the upstream kokoro-fastapi art."""
+    banner = _startup_banner(
+        device="cuda",
+        model="kokoro_v1",
+        voicepack_count=54,
+        gpu=CUDA_GPU,
+        scheme="https",
+        color=False,
+    )
+    assert "ForgeGuard Kokoro Server" in banner
+    assert f"v{settings.api_version}" in banner
+    assert "54 packs loaded" in banner
+    # The old upstream splash must be gone.
+    assert "FAST" not in banner
+    assert "░" not in banner
+    assert "╔" not in banner
+
+
+def test_startup_banner_reports_runtime_facts():
+    """Enriched content: endpoint, auth state, device/VRAM, and console URL."""
+    banner = _startup_banner(
+        device="cuda",
+        model="kokoro_v1",
+        voicepack_count=54,
+        gpu=CUDA_GPU,
+        scheme="https",
+        color=False,
+    )
+    assert f"https://{settings.host}:{settings.port}" in banner
+    assert "NVIDIA GeForce RTX 4090" in banner
+    assert "2.0 / 24.0 GiB" in banner  # bytes -> GiB
+    auth_expected = "bearer token (enabled)" if settings.api_key else "open (disabled)"
+    assert auth_expected in banner
+
+
+def test_startup_banner_cpu_has_no_gpu_rows():
+    """On CPU there is no GPU/VRAM line and the device reads plainly."""
+    banner = _startup_banner(
+        device="cpu",
+        model="kokoro_v1",
+        voicepack_count=1,
+        gpu=None,
+        scheme="http",
+        color=False,
+    )
+    assert "cpu" in banner
+    assert "VRAM" not in banner
+
+
+def test_startup_banner_color_markup_is_balanced():
+    """Colored output must be valid loguru markup (balanced <fg ...> tags)."""
+    banner = _startup_banner(
+        device="cuda",
+        model="kokoro_v1",
+        voicepack_count=54,
+        gpu=CUDA_GPU,
+        scheme="https",
+        color=True,
+    )
+    assert banner.count("<fg #6366F1>") == banner.count("</fg #6366F1>")
+    assert "<fg #6366F1>" in banner

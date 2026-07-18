@@ -32,8 +32,13 @@ _DOWNLOAD_TIMEOUT = int(os.getenv("MODEL_DOWNLOAD_TIMEOUT", "120"))
 _DOWNLOAD_RETRIES = int(os.getenv("MODEL_DOWNLOAD_RETRIES", "4"))
 
 
+# Prefix every line so the model-download output reads as part of the same
+# ForgeGuard Kokoro Server boot log rather than anonymous stderr noise.
+_PREFIX = "[forgeguard] "
+
+
 def _log(msg: str) -> None:
-    print(msg, file=sys.stderr, flush=True)
+    print(f"{_PREFIX}{msg}", file=sys.stderr, flush=True)
 
 
 class _Logger:

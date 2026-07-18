@@ -9,7 +9,6 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import torch
 import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,21 +24,24 @@ from .routers.development import router as dev_router
 from .routers.openai_compatible import router as openai_router
 from .routers.web_player import router as web_router
 
+# ForgeGuard brand indigo — matches the web console accent (--color-accent
+# #6366F1) so terminal logs and the browser UI read as one product.
+_ACCENT = "#6366F1"
+
 
 def setup_logger():
-    """Configure loguru logger with custom formatting"""
+    """Configure loguru with the ForgeGuard log format (brand indigo accent)."""
     valid_levels = ["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"]
     level = os.getenv("API_LOG_LEVEL", "INFO").upper()
     if level not in valid_levels:
         level = "INFO"
-    print(f"Global API loguru logger level: {level}")
     config = {
         "handlers": [
             {
                 "sink": sys.stdout,
-                "format": "<fg #2E8B57>{time:hh:mm:ss A}</fg #2E8B57> | "
+                "format": "<dim>{time:hh:mm:ss A}</dim> | "
                 "{level: <8} | "
-                "<fg #4169E1>{module}:{line}</fg #4169E1> | "
+                f"<fg {_ACCENT}>{{module}}:{{line}}</fg {_ACCENT}> | "
                 "{message}",
                 "colorize": True,
                 "level": level,
@@ -49,10 +51,81 @@ def setup_logger():
     logger.remove()
     logger.configure(**config)
     logger.level("ERROR", color="<red>")
+    logger.info(f"Logging initialized (level={level})")
 
 
 # Configure logger
 setup_logger()
+
+
+def _startup_banner(
+    *,
+    device: str,
+    model: str,
+    voicepack_count: int,
+    gpu: dict | None,
+    scheme: str,
+    color: bool = True,
+) -> str:
+    """Render the ForgeGuard Kokoro Server startup panel.
+
+    A clean, angular box — no ASCII wordmark, no emoji — matching the web
+    console's squared aesthetic and carrying the facts an operator wants at a
+    glance: version, endpoint, auth state, device/VRAM, model, voices, console.
+
+    When ``color`` is set the frame and title are wrapped in loguru color
+    markup (brand indigo); the caller must then emit via
+    ``logger.opt(colors=True)``. Dynamic values are stripped of angle brackets
+    so they can never inject or unbalance that markup.
+    """
+
+    def _clean(value: object) -> str:
+        return str(value).replace("<", "").replace(">", "")
+
+    title = "ForgeGuard Kokoro Server"
+    version = f"v{_clean(settings.api_version)}"
+
+    if device == "cuda":
+        name = gpu.get("name") if gpu else None
+        device_val = f"cuda — {_clean(name)}" if name else "cuda"
+    elif device == "mps":
+        device_val = "mps — Apple Metal Performance Shaders"
+    else:
+        device_val = "cpu"
+
+    rows: list[tuple[str, str]] = [
+        ("Status", "ready"),
+        ("Endpoint", _clean(f"{scheme}://{settings.host}:{settings.port}")),
+        ("Auth", "bearer token (enabled)" if settings.api_key else "open (disabled)"),
+        ("Device", device_val),
+    ]
+    if gpu and gpu.get("memory_total_bytes"):
+        gib = 1024**3
+        used = gpu.get("memory_used_bytes", 0) / gib
+        total = gpu["memory_total_bytes"] / gib
+        rows.append(("VRAM", f"{used:.1f} / {total:.1f} GiB"))
+    rows.append(("Model", _clean(model)))
+    rows.append(("Voices", f"{voicepack_count} packs loaded"))
+    if settings.enable_web_player:
+        rows.append(("Console", _clean(f"{scheme}://localhost:{settings.port}/web/")))
+    else:
+        rows.append(("Console", "disabled"))
+
+    label_w = max(len(label) for label, _ in rows)
+    body = [f"{label.ljust(label_w)} : {value}" for label, value in rows]
+    # Inner width holds either "title  version" (>=2 spaces between) or any row.
+    inner = max(len(title) + 2 + len(version), *(len(line) for line in body))
+
+    paint = (lambda s: f"<fg {_ACCENT}>{s}</fg {_ACCENT}>") if color else (lambda s: s)
+    bar = paint("│")
+    lines = [
+        paint("┌─" + "─" * inner + "─┐"),
+        f"{bar} {paint(title)}{' ' * (inner - len(title) - len(version))}{version} {bar}",
+        paint("├─" + "─" * inner + "─┤"),
+    ]
+    lines += [f"{bar} {line.ljust(inner)} {bar}" for line in body]
+    lines.append(paint("└─" + "─" * inner + "─┘"))
+    return "\n".join(lines)
 
 
 async def _warmup(app: FastAPI):
@@ -85,38 +158,23 @@ async def _warmup(app: FastAPI):
 
     model_status.set_ready(device, model, voicepack_count)
 
-    boundary = "░" * 2 * 12
-    startup_msg = f"""
+    from .core.telemetry import gpu_info
 
-{boundary}
-
-    ╔═╗┌─┐┌─┐┌┬┐
-    ╠╣ ├─┤└─┐ │
-    ╚  ┴ ┴└─┘ ┴
-    ╦╔═┌─┐┬┌─┌─┐
-    ╠╩╗│ │├┴┐│ │
-    ╩ ╩└─┘┴ ┴└─┘
-
-{boundary}
-                """
-    startup_msg += f"\nModel warmed up on {device}: {model}"
-    if device == "mps":
-        startup_msg += "\nUsing Apple Metal Performance Shaders (MPS)"
-    elif device == "cuda":
-        startup_msg += f"\nCUDA: {torch.cuda.is_available()}"
-    else:
-        startup_msg += "\nRunning on CPU"
-    startup_msg += f"\n{voicepack_count} voice packs loaded"
-
-    # Add web player info if enabled
-    if settings.enable_web_player:
-        startup_msg += f"\n\nWeb Console: http://{settings.host}:{settings.port}/web/"
-        startup_msg += f"\nor http://localhost:{settings.port}/web/"
-    else:
-        startup_msg += "\n\nWeb Console: disabled"
-
-    startup_msg += f"\n{boundary}\n"
-    logger.info(startup_msg)
+    gpu = gpu_info() if device == "cuda" else None
+    scheme = "https" if settings.tls_enabled else "http"
+    banner_args = dict(
+        device=device,
+        model=model,
+        voicepack_count=voicepack_count,
+        gpu=gpu,
+        scheme=scheme,
+    )
+    try:
+        logger.opt(colors=True).info("\n" + _startup_banner(**banner_args, color=True))
+    except Exception:
+        # Never let banner rendering (e.g. loguru color-markup parsing) take a
+        # healthy server down — fall back to the uncolored panel.
+        logger.info("\n" + _startup_banner(**banner_args, color=False))
 
 
 @asynccontextmanager

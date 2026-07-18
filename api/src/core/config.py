@@ -22,8 +22,10 @@ def _read_version() -> str:
 
 class Settings(BaseSettings):
     # API Settings
-    api_title: str = "Kokoro Server"
-    api_description: str = "OpenAI-compatible text-to-speech API built on Kokoro-82M"
+    api_title: str = "ForgeGuard Kokoro Server"
+    api_description: str = (
+        "Container-native, OpenAI-compatible text-to-speech API built on Kokoro-82M."
+    )
     api_version: str = _read_version()
     host: str = "0.0.0.0"
     port: int = 8880

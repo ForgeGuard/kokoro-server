@@ -9,12 +9,12 @@ fi
 # are missing here (and we weren't asked to download them), something is
 # shadowing them — most likely a volume mount over /app/api.
 if [ "$DOWNLOAD_MODEL" != "true" ] && [ ! -f "/app/api/src/models/v1_0/kokoro-v1_0.pth" ]; then
-    echo "ERROR: model weights not found at /app/api/src/models/v1_0/kokoro-v1_0.pth." >&2
-    echo "The weights are baked into the image at build time, so if they are missing" >&2
-    echo "a volume mount over /app/api is most likely shadowing them (e.g. a" >&2
-    echo "'../../api:/app/api' bind mount in docker-compose)." >&2
-    echo "Fix: remove the mount over /app/api, or set DOWNLOAD_MODEL=true to" >&2
-    echo "download the weights at container start." >&2
+    echo "[forgeguard] ERROR: model weights not found at /app/api/src/models/v1_0/kokoro-v1_0.pth." >&2
+    echo "[forgeguard] The weights are baked into the ForgeGuard Kokoro Server image at build" >&2
+    echo "[forgeguard] time, so if they are missing a volume mount over /app/api is most likely" >&2
+    echo "[forgeguard] shadowing them (e.g. a '../../api:/app/api' bind mount in docker-compose)." >&2
+    echo "[forgeguard] Fix: remove the mount over /app/api, or set DOWNLOAD_MODEL=true to" >&2
+    echo "[forgeguard] download the weights at container start." >&2
     exit 1
 fi
 
