@@ -6,7 +6,8 @@
 
 **ForgeGuard Kokoro Server** is a container-native, OpenAI-compatible
 text-to-speech server built around the
-[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model. Forked from
+[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model. An independent
+ForgeGuard AI server originally derived from
 [remsky/Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)
 (see [Attribution](#license--attribution)).
 
@@ -26,8 +27,8 @@ bare-metal install path.
 
 | Hardware | Image |
 |---|---|
-| NVIDIA RTX 3000 → 5000 series (x86_64, CUDA cu128) | `ghcr.io/forgeguard/kokoro-server:latest` (alias: `kokoro-server-cu128`) |
-| NVIDIA Jetson Orin (arm64, JetPack 6) | `ghcr.io/forgeguard/kokoro-server-jetson:latest` |
+| NVIDIA RTX 3000 → 5000 series (x86_64, CUDA cu128) | `ghcr.io/forgeguard-ai/kokoro-server:latest` (alias: `kokoro-server-cu128`) |
+| NVIDIA Jetson Orin (arm64, JetPack 6) | `ghcr.io/forgeguard-ai/kokoro-server-jetson:latest` |
 | AMD (ROCm), Intel | planned — see [Roadmap](#roadmap) |
 
 `:latest` works, but pin a release tag (e.g. `:1.1.0`) for stable deployments.
@@ -41,11 +42,11 @@ bare-metal install path.
 ```bash
 # NVIDIA amd64 (RTX 3000 through RTX 5000)
 docker run -d --name kokoro --gpus all -p 8880:8880 \
-  ghcr.io/forgeguard/kokoro-server:latest
+  ghcr.io/forgeguard-ai/kokoro-server:latest
 
 # NVIDIA Jetson (arm64, Orin)
 docker run -d --name kokoro --runtime nvidia -p 8880:8880 \
-  ghcr.io/forgeguard/kokoro-server-jetson:latest
+  ghcr.io/forgeguard-ai/kokoro-server-jetson:latest
 ```
 
 Prefer Compose? [`docker/gpu/docker-compose.prod.yml`](docker/gpu/docker-compose.prod.yml)
@@ -88,7 +89,7 @@ requires `Authorization: Bearer <key>`:
 
 ```bash
 docker run -d --gpus all -p 8880:8880 -e API_KEY=change-me \
-  ghcr.io/forgeguard/kokoro-server:latest
+  ghcr.io/forgeguard-ai/kokoro-server:latest
 
 curl -H 'Authorization: Bearer change-me' http://localhost:8880/v1/models
 ```
@@ -296,7 +297,7 @@ is enabled. Disable it with `ENABLE_WEB_PLAYER=false`.
 ## Kubernetes (Helm)
 
 ```bash
-helm install kokoro oci://ghcr.io/forgeguard/charts/kokoro-server --version 1.1.0
+helm install kokoro oci://ghcr.io/forgeguard-ai/charts/kokoro-server --version 1.1.0
 ```
 
 The chart (also in [`charts/kokoro-server`](charts/kokoro-server)) wires the
@@ -378,7 +379,7 @@ or `ffprobe` for exact length.
 This repository is licensed under the [Apache License 2.0](LICENSE); see
 [NOTICE](NOTICE) for required attributions.
 
-- Forked from [remsky/Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)
+- Originally derived from [remsky/Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)
   (Apache 2.0) — the original Dockerized FastAPI wrapper this project builds on.
 - [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model weights by
   [hexgrad](https://github.com/hexgrad) (Apache 2.0), with

@@ -1,7 +1,7 @@
 ForgeGuard Kokoro Server
 Copyright 2026 ForgeGuard
 
-This product is a modified fork of Kokoro-FastAPI
+This product is derived from Kokoro-FastAPI
 (https://github.com/remsky/Kokoro-FastAPI),
 Copyright remsky and the Kokoro-FastAPI contributors,
 licensed under the Apache License, Version 2.0.

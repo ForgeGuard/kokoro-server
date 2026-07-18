@@ -4,7 +4,7 @@
 kokoroTTS:
   replicaCount: 1
   # The name of the deployment repository
-  repository: "ghcr.io/forgeguard/kokoro-server"
+  repository: "ghcr.io/forgeguard-ai/kokoro-server"
   imagePullSecrets: [] # Set if using a private image or getting rate limited
   # Defaults to the chart appVersion (a pinned release) when empty.
   tag: ""

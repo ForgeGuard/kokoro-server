@@ -6,7 +6,7 @@ name: kokoro-server-gpu
 services:
   kokoro-tts:
     # Published image (amd64, cu128 — RTX 3000 through RTX 5000):
-    #   image: ghcr.io/forgeguard/kokoro-server-cu128:latest
+    #   image: ghcr.io/forgeguard-ai/kokoro-server-cu128:latest
     # Or build locally from source:
     build:
       context: ../..

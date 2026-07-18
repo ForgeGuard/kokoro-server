@@ -142,9 +142,9 @@ def update_readme(version: str):
         content = README_FILE.read_text()
         original_content = content
 
-        # Pinned ghcr.io/forgeguard/kokoro-server[-variant]:X.Y.Z (or :vX.Y.Z) tags
+        # Pinned ghcr.io/forgeguard-ai/kokoro-server[-variant]:X.Y.Z (or :vX.Y.Z) tags
         pattern = (
-            r"(ghcr\.io/forgeguard/kokoro-server(?:-cu128|-jetson)?):(v?\d+\.\d+\.\d+)"
+            r"(ghcr\.io/forgeguard-ai/kokoro-server(?:-cu128|-jetson)?):(v?\d+\.\d+\.\d+)"
         )
         matches = list(re.finditer(pattern, content))  # Find all occurrences
 

@@ -9,7 +9,7 @@ name: kokoro-server-test
 #         --abort-on-container-exit --exit-code-from test-client
 #
 # Against a published server image (e.g. release verification):
-#     SERVER_IMAGE=ghcr.io/forgeguard/kokoro-server-cu128:latest \
+#     SERVER_IMAGE=ghcr.io/forgeguard-ai/kokoro-server-cu128:latest \
 #         docker compose -f docker/docker-compose.test.yml up \
 #         --abort-on-container-exit --exit-code-from test-client
 #
