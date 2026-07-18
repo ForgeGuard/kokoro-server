@@ -1,0 +1,22 @@
+version: 1
+enabled: true
+
+project:
+  slug: kokoro-server
+  title: ForgeGuard Kokoro Server
+  kind: original
+  summary: OpenAI-compatible local speech synthesis for container and Kubernetes deployments.
+
+repository:
+  owner: forgeguard-ai
+  name: kokoro-server
+  default_branch: main
+
+source:
+  content_root: docs/site
+  entrypoint: index.md
+
+publishing:
+  route: /projects/kokoro-server/docs
+  versions: both
+  include_generated: false
